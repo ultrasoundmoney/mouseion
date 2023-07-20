@@ -7,22 +7,27 @@ use tracing::{debug, warn};
 
 const SECRET_LOG_BLACKLIST: [&str; 0] = [];
 
+fn obfuscate_if_secret(blacklist: &[&str], key: &str, value: &str) -> String {
+    if blacklist.contains(&key) {
+        let mut last_four = value.to_string();
+        last_four.drain(0..value.len().saturating_sub(4));
+        format!("****{last_four}")
+    } else {
+        value.to_string()
+    }
+}
+
 /// Get an environment variable, encoding found or missing as Option, and panic otherwise.
 pub fn get_env_var(key: &str) -> Option<String> {
     let var = match env::var(key) {
         Err(env::VarError::NotPresent) => None,
-        Err(err) => panic!("{}", err),
+        Err(err) => panic!("{err}"),
         Ok(var) => Some(var),
     };
 
     if let Some(ref existing_var) = var {
-        if SECRET_LOG_BLACKLIST.contains(&key) {
-            let mut last_four = existing_var.clone();
-            last_four.drain(0..existing_var.len() - 4);
-            debug!("env var {key}: ****{last_four}")
-        } else {
-            debug!("env var {key}: {existing_var}");
-        }
+        let output = obfuscate_if_secret(&SECRET_LOG_BLACKLIST, key, existing_var);
+        debug!("env var {key}: {output}");
     } else {
         debug!("env var {key} requested but not found")
     };
@@ -38,7 +43,7 @@ pub fn get_env_var_unsafe(key: &str) -> String {
 
 /// Some things are different between environments. Urls we contact, timeouts we use, data we have.
 /// This enum is the main way to create these branches in our logic.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Env {
     Dev,
     Prod,
@@ -133,5 +138,49 @@ mod tests {
         let test_value = "false";
         std::env::set_var(test_key, test_value);
         assert!(!get_env_bool(test_key));
+    }
+
+    #[test]
+    fn get_env_test() {
+        std::env::set_var("ENV", "dev");
+        assert_eq!(get_env(), Env::Dev);
+
+        std::env::set_var("ENV", "development");
+        assert_eq!(get_env(), Env::Dev);
+
+        std::env::set_var("ENV", "stag");
+        assert_eq!(get_env(), Env::Stag);
+
+        std::env::set_var("ENV", "staging");
+        assert_eq!(get_env(), Env::Stag);
+
+        std::env::set_var("ENV", "prod");
+        assert_eq!(get_env(), Env::Prod);
+
+        std::env::set_var("ENV", "production");
+        assert_eq!(get_env(), Env::Prod);
+
+        std::env::remove_var("ENV");
+        assert_eq!(get_env(), Env::Dev);
+
+        std::env::set_var("ENV", "invalid_env");
+        let result = std::panic::catch_unwind(|| get_env());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn obfuscate_if_secret_test() {
+        let secret_key = "SECRET_KEY";
+        let blacklist = vec![secret_key];
+        assert_eq!(
+            obfuscate_if_secret(&blacklist, secret_key, "my_secret_value"),
+            "****alue"
+        );
+
+        let normal_key = "NORMAL_KEY";
+        assert_eq!(
+            obfuscate_if_secret(&blacklist, normal_key, "my_normal_value"),
+            "my_normal_value"
+        );
     }
 }
