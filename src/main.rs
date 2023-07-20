@@ -21,12 +21,13 @@ use crate::health::get_healthz;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
-    nats_health: NatsHealth,
     message_health: MessageHealth,
+    nats_client: async_nats::Client,
+    nats_health: NatsHealth,
 }
 
-async fn process_messages(client: async_nats::Client, message_health: MessageHealth) -> Result<()> {
-    let jetstream = jetstream::new(client);
+async fn process_messages(state: AppState) -> Result<()> {
+    let jetstream = jetstream::new(state.nats_client);
 
     let stream = jetstream.get_stream("payload-archive").await?;
 
@@ -71,18 +72,13 @@ async fn process_messages(client: async_nats::Client, message_health: MessageHea
         ack_handle.await.context("joining ack message thread")??;
 
         // Update last_message_received to now
-        message_health.set_last_message_received_now();
+        state.message_health.set_last_message_received_now();
     }
 
     Ok(())
 }
 
-async fn serve(message_health: MessageHealth, nats_health: NatsHealth) -> Result<()> {
-    let state = AppState {
-        message_health,
-        nats_health,
-    };
-
+async fn serve(state: AppState) -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(get_healthz))
         .with_state(state);
@@ -101,23 +97,33 @@ async fn serve(message_health: MessageHealth, nats_health: NatsHealth) -> Result
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    info!("starting payload archiver");
+
     let last_message_received: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
-    let client = async_nats::connect(nats_uri).await?;
+    let nats_client = async_nats::connect(nats_uri).await?;
 
-    let nats_health = NatsHealth::new(client.clone());
+    let nats_health = NatsHealth::new(nats_client.clone());
     let message_health = MessageHealth::new(last_message_received);
 
-    let messages_thread = tokio::spawn(process_messages(client.clone(), message_health.clone()));
+    let app_state = AppState {
+        nats_client,
+        nats_health,
+        message_health,
+    };
 
-    let server_thread = tokio::spawn(async move { serve(message_health, nats_health).await });
+    let messages_thread = tokio::spawn(process_messages(app_state.clone()));
+
+    let server_thread = tokio::spawn(serve(app_state));
 
     let (messages_thread_result, server_thread_result) =
         try_join!(messages_thread, server_thread).context("joining message and server threads")?;
 
     messages_thread_result?;
     server_thread_result?;
+
+    info!("payload archiver exiting");
 
     Ok(())
 }
