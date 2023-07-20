@@ -701,6 +701,7 @@ dependencies = [
  "bytes",
  "eyre",
  "futures",
+ "lazy_static",
  "serde_json",
  "tokio",
  "tracing",
