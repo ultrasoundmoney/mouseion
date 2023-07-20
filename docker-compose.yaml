@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  nats:
+    image: nats:latest
+    command: -js
+    ports:
+      - 4222:4222
+
+  payload-archiver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NATS_URI=nats://nats:4222
+      - RUST_LOG=debug,async_nats=warn
+    depends_on:
+      - nats
