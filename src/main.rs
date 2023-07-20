@@ -21,54 +21,112 @@ use crate::env::Env;
 
 #[derive(Debug, Clone)]
 struct AppState {
-    last_message_received: Arc<Mutex<Option<Instant>>>,
-    started_on: Instant,
+    nats_health: NatsHealth,
+    message_health: MessageHealth,
 }
 
-async fn get_healthz(State(state): State<AppState>) -> impl IntoResponse {
-    let time_since_start = Instant::now() - state.started_on;
-    let last_message_recieved_inner_clone = *state.last_message_received.lock().unwrap();
-    let time_since_last_message =
-        last_message_recieved_inner_clone.map(|instant| Instant::now() - instant);
-    let max_silence_duration = match env::get_env() {
-        Env::Dev => Duration::from_secs(60),
-        Env::Stag => Duration::from_secs(60),
-        Env::Prod => Duration::from_secs(24),
-    };
+trait HealthCheckable {
+    fn health_status(&self) -> (bool, String);
+}
 
-    let is_healthy = match time_since_last_message {
-        None => time_since_start <= max_silence_duration,
-        Some(time_since_last_message) => time_since_last_message <= max_silence_duration,
-    };
+#[derive(Debug, Clone)]
+struct MessageHealth {
+    started_on: Instant,
+    last_message_received: Arc<Mutex<Option<Instant>>>,
+}
 
-    if is_healthy {
-        (
-            StatusCode::OK,
-            Json(json!({
-                "message_queue": "healthy"
-            })),
-        )
-            .into_response()
-    } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "message_queue":
-                    format!(
-                        "no message seen for more than {} seconds",
-                        max_silence_duration.as_secs()
-                    )
-            })),
-        )
-            .into_response()
+impl MessageHealth {
+    fn new(last_message_received: Arc<Mutex<Option<Instant>>>) -> Self {
+        Self {
+            started_on: Instant::now(),
+            last_message_received,
+        }
+    }
+
+    fn set_last_message_received(&self, instant: Instant) {
+        self.last_message_received.lock().unwrap().replace(instant);
+    }
+
+    pub fn set_last_message_received_now(&self) {
+        self.set_last_message_received(Instant::now());
     }
 }
 
-async fn process_messages(last_message_received: Arc<Mutex<Option<Instant>>>) -> Result<()> {
-    let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
+impl HealthCheckable for MessageHealth {
+    fn health_status(&self) -> (bool, String) {
+        let time_since_start = Instant::now() - self.started_on;
 
-    let client = async_nats::connect(nats_uri).await?;
+        // To avoid blocking the constant writes to this value we clone.
+        let last_message_recieved_clone = *self
+            .last_message_received
+            .lock()
+            .expect("expect to acquire lock on last_message_received in health check");
+        let time_since_last_message =
+            last_message_recieved_clone.map(|instant| Instant::now() - instant);
+        let max_silence_duration = match env::get_env() {
+            Env::Dev => Duration::from_secs(60),
+            Env::Stag => Duration::from_secs(60),
+            Env::Prod => Duration::from_secs(24),
+        };
 
+        let is_healthy = match time_since_last_message {
+            None => time_since_start <= max_silence_duration,
+            Some(time_since_last_message) => time_since_last_message <= max_silence_duration,
+        };
+
+        if is_healthy {
+            (true, "healthy".to_string())
+        } else {
+            (
+                false,
+                format!(
+                    "no message seen for more than {} seconds",
+                    max_silence_duration.as_secs()
+                ),
+            )
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct NatsHealth {
+    nats: async_nats::Client,
+}
+
+impl NatsHealth {
+    fn new(nats: async_nats::Client) -> Self {
+        Self { nats }
+    }
+}
+
+impl HealthCheckable for NatsHealth {
+    fn health_status(&self) -> (bool, String) {
+        use async_nats::connection::State;
+        match self.nats.connection_state() {
+            State::Connected => (true, "connected".to_string()),
+            State::Disconnected => (false, "disconnected".to_string()),
+            State::Pending => (false, "reconnecting".to_string()),
+        }
+    }
+}
+
+async fn get_healthz(State(state): State<AppState>) -> impl IntoResponse {
+    let (is_nats_healthy, nats_health_status) = state.nats_health.health_status();
+
+    if is_nats_healthy {
+        (
+            StatusCode::OK,
+            Json(json!({ "message_queue": nats_health_status })),
+        )
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "message_queue": nats_health_status })),
+        )
+    }
+}
+
+async fn process_messages(client: async_nats::Client, message_health: MessageHealth) -> Result<()> {
     let jetstream = jetstream::new(client);
 
     let stream = jetstream.get_stream("payload-archive").await?;
@@ -114,22 +172,16 @@ async fn process_messages(last_message_received: Arc<Mutex<Option<Instant>>>) ->
         ack_handle.await.context("joining ack message thread")??;
 
         // Update last_message_received to now
-        last_message_received
-            .lock()
-            .unwrap()
-            .replace(Instant::now());
+        message_health.set_last_message_received_now();
     }
 
     Ok(())
 }
 
-async fn serve(
-    started_on: Instant,
-    last_message_received: Arc<Mutex<Option<Instant>>>,
-) -> Result<()> {
-    let state: AppState = AppState {
-        started_on,
-        last_message_received,
+async fn serve(message_health: MessageHealth, nats_health: NatsHealth) -> Result<()> {
+    let state = AppState {
+        message_health,
+        nats_health,
     };
 
     let app = Router::new()
@@ -150,14 +202,17 @@ async fn serve(
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let started_on = Instant::now();
     let last_message_received: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    let last_message_received_serve = last_message_received.clone();
 
-    let server_thread =
-        tokio::spawn(async move { serve(started_on, last_message_received_serve).await });
+    let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
+    let client = async_nats::connect(nats_uri).await?;
 
-    let messages_thread = tokio::spawn(process_messages(last_message_received.clone()));
+    let nats_health = NatsHealth::new(client.clone());
+    let message_health = MessageHealth::new(last_message_received);
+
+    let messages_thread = tokio::spawn(process_messages(client.clone(), message_health.clone()));
+
+    let server_thread = tokio::spawn(async move { serve(message_health, nats_health).await });
 
     let (messages_thread_result, server_thread_result) =
         try_join!(messages_thread, server_thread).context("joining message and server threads")?;
