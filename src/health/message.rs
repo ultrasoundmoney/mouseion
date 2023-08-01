@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 
 use crate::env::{self, Env};
 
-use super::HealthCheckable;
+use super::HealthCheck;
 
 #[derive(Debug, Clone)]
 pub struct MessageHealth {
@@ -40,7 +40,7 @@ lazy_static! {
     };
 }
 
-impl HealthCheckable for MessageHealth {
+impl HealthCheck for MessageHealth {
     fn health_status(&self) -> (bool, String) {
         let time_since_start = Instant::now() - self.started_on;
 

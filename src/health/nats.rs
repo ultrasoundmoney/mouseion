@@ -1,4 +1,4 @@
-use super::HealthCheckable;
+use super::HealthCheck;
 
 #[derive(Debug, Clone)]
 pub struct NatsHealth {
@@ -11,7 +11,7 @@ impl NatsHealth {
     }
 }
 
-impl HealthCheckable for NatsHealth {
+impl HealthCheck for NatsHealth {
     fn health_status(&self) -> (bool, String) {
         use async_nats::connection::State;
         match self.nats.connection_state() {

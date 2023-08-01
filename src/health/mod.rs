@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 
 use crate::AppState;
 
-trait HealthCheckable {
+trait HealthCheck {
     fn health_status(&self) -> (bool, String);
 }
 
