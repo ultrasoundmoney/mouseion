@@ -2,11 +2,11 @@ use axum::{routing::get, Router, Server};
 use eyre::{Context, Result};
 use tracing::info;
 
-use crate::{env, health::get_healthz, AppState};
+use crate::{env, health::get_livez, AppState};
 
 pub async fn serve(state: AppState) -> Result<()> {
     let app = Router::new()
-        .route("/livez", get(get_healthz))
+        .route("/livez", get(get_livez))
         .with_state(state);
 
     let port = env::get_env_var("PORT").unwrap_or_else(|| "3003".to_string());
