@@ -6,7 +6,7 @@ use crate::{env, health::get_healthz, AppState};
 
 pub async fn serve(state: AppState) -> Result<()> {
     let app = Router::new()
-        .route("/healthz", get(get_healthz))
+        .route("/livez", get(get_healthz))
         .with_state(state);
 
     let port = env::get_env_var("PORT").unwrap_or_else(|| "3003".to_string());
