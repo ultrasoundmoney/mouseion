@@ -3,11 +3,6 @@ mod health;
 mod messages;
 mod serve;
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
-};
-
 use eyre::{Context, Result};
 use health::{MessageHealth, NatsHealth};
 use tokio::try_join;
@@ -26,15 +21,13 @@ async fn main() -> Result<()> {
 
     info!("starting payload archiver");
 
-    let last_message_received: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-
     let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
     let nats_client = async_nats::connect(nats_uri)
         .await
         .context("connecting to NATS")?;
 
     let nats_health = NatsHealth::new(nats_client.clone());
-    let message_health = MessageHealth::new(last_message_received);
+    let message_health = MessageHealth::new();
 
     let app_state = AppState {
         nats_client,

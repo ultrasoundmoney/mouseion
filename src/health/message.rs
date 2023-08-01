@@ -11,15 +11,15 @@ use super::HealthCheck;
 
 #[derive(Debug, Clone)]
 pub struct MessageHealth {
-    started_on: Instant,
     last_message_received: Arc<Mutex<Option<Instant>>>,
+    started_on: Instant,
 }
 
 impl MessageHealth {
-    pub fn new(last_message_received: Arc<Mutex<Option<Instant>>>) -> Self {
+    pub fn new() -> Self {
         Self {
+            last_message_received: Arc::new(Mutex::new(None)),
             started_on: Instant::now(),
-            last_message_received,
         }
     }
 
