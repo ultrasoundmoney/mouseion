@@ -2,17 +2,21 @@ use async_nats::jetstream::{
     self,
     consumer::pull::{self},
 };
-use eyre::{anyhow, Context, Result};
+use eyre::{eyre, Context, Result};
 use futures::TryStreamExt;
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::AppState;
 
-pub async fn process_messages(state: AppState) -> Result<()> {
-    let jetstream = jetstream::new(state.nats_client);
+const STREAM_NAME: &str = "payload-archive";
 
-    let stream = jetstream.get_stream("payload-archive").await?;
+pub async fn process_messages(state: AppState) -> Result<()> {
+    info!("starting message processing");
+
+    let nats_context = jetstream::new(state.nats_client);
+
+    let stream = nats_context.get_stream(STREAM_NAME).await?;
 
     let consumer = stream
         .get_or_create_consumer(
@@ -33,7 +37,7 @@ pub async fn process_messages(state: AppState) -> Result<()> {
             acker
                 .ack()
                 .await
-                .map_err(|e| anyhow!(e))
+                .map_err(|e| eyre!(e))
                 .context("trying to ack message")
         });
 
@@ -42,12 +46,12 @@ pub async fn process_messages(state: AppState) -> Result<()> {
         let payload_json = serde_json::from_slice::<Value>(&payload)?;
         let block_number = payload_json["block_number"]
             .as_str()
-            .ok_or_else(|| anyhow!("block_number missing from payload"))?
+            .ok_or_else(|| eyre!("block_number missing from payload"))?
             .parse::<u64>()
             .context("failed to parse block_number string as u64")?;
         let state_root = payload_json["state_root"]
             .as_str()
-            .ok_or_else(|| anyhow!("state_root missing from payload"))?;
+            .ok_or_else(|| eyre!("state_root missing from payload"))?;
 
         debug!(block_number, state_root, "acked payload");
 

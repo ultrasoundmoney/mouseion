@@ -4,8 +4,8 @@ mod messages;
 mod serve;
 
 use eyre::{Context, Result};
+use futures::try_join;
 use health::{MessageHealth, NatsHealth};
-use tokio::try_join;
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -35,15 +35,11 @@ async fn main() -> Result<()> {
         message_health,
     };
 
-    let messages_thread = tokio::spawn(messages::process_messages(app_state.clone()));
+    let messages_thread = messages::process_messages(app_state.clone());
 
-    let server_thread = tokio::spawn(serve::serve(app_state));
+    let server_thread = serve::serve(app_state);
 
-    let (messages_thread_result, server_thread_result) =
-        try_join!(messages_thread, server_thread).context("joining message and server threads")?;
-
-    messages_thread_result?;
-    server_thread_result?;
+    try_join!(messages_thread, server_thread).context("joining message and server threads")?;
 
     info!("payload archiver exiting");
 
