@@ -2,19 +2,18 @@ mod bundle_aggregator;
 mod env;
 mod health;
 mod messages;
+mod object_storage;
 mod serve;
 mod units;
 
 use anyhow::{Context, Result};
 use bundle_aggregator::ArchiveBundle;
-use chrono::Datelike;
 use futures::{channel::mpsc, try_join, FutureExt, StreamExt};
 use health::{MessageHealth, NatsHealth};
-use object_store::{path::Path, ObjectStore};
+use object_store::ObjectStore;
 use tracing::info;
-use units::Slot;
 
-use crate::{bundle_aggregator::BundleAggregator, env::Env};
+use crate::bundle_aggregator::BundleAggregator;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -24,17 +23,15 @@ pub struct AppState {
 }
 
 async fn run_object_storage(
-    mut rx: mpsc::UnboundedReceiver<(Slot, ArchiveBundle)>,
-    file_based_object_store: impl ObjectStore,
+    object_store: impl ObjectStore,
+    mut rx: mpsc::UnboundedReceiver<ArchiveBundle>,
 ) -> Result<()> {
-    while let Some((slot, archive_bundle)) = rx.next().await {
-        let slot_date_time = slot.date_time();
-        let year = slot_date_time.year();
-        let month = slot_date_time.month();
-        let day = slot_date_time.day();
-        let path = Path::from(format!("{year}/{month}/{day}/{slot}.ndjson.gz"));
-        file_based_object_store
-            .put(&path, archive_bundle.to_ndjson_gz()?.into())
+    while let Some(archive_bundle) = rx.next().await {
+        object_store
+            .put(
+                &archive_bundle.path(),
+                archive_bundle.to_ndjson_gz()?.into(),
+            )
             .await?;
 
         // Bundle has been successfully stored, ack the messages.
@@ -55,25 +52,10 @@ async fn main() -> Result<()> {
         .await
         .context("connecting to NATS")?;
 
-    let bucket_name = {
-        let env = env::get_env();
-        if env == Env::Prod {
-            "execution-payload-archive"
-        } else {
-            "execution-payload-archive-dev"
-        }
-    };
-
-    let ovh_object_store = object_store::aws::AmazonS3Builder::new()
-        .with_endpoint("https://s3.rbx.io.cloud.ovh.net/")
-        .with_region("rbx")
-        .with_bucket_name(bucket_name)
-        .with_secret_access_key(env::get_env_var_unsafe("S3_SECRET_ACCESS_KEY"))
-        .with_access_key_id("3a7f56c872164eeb9ea200823ad7b403")
-        .build()?;
-
     let (tx, rx) = mpsc::unbounded();
     let bundle_aggregator = BundleAggregator::new(tx);
+
+    let object_store = object_storage::build_ovh_object_store()?;
 
     let nats_health = NatsHealth::new(nats_client.clone());
     let message_health = MessageHealth::new();
@@ -90,7 +72,7 @@ async fn main() -> Result<()> {
 
     let server_thread = serve::serve(app_state);
 
-    let object_storage_thread = tokio::spawn(run_object_storage(rx, ovh_object_store));
+    let object_storage_thread = tokio::spawn(run_object_storage(object_store, rx));
 
     try_join!(
         messages_thread,
