@@ -15,6 +15,7 @@ use crate::{health::MessageConsumerHealth, units::Slot};
 type JsonValue = serde_json::Value;
 
 pub const STREAM_NAME: &str = "payload-archive";
+const CONSUMER_NAME: &str = "payload-archive-consumer";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Withdrawal {
@@ -63,9 +64,9 @@ impl MessageConsumer {
 
         let consumer = stream
             .get_or_create_consumer(
-                "ack-all-consumer",
+                CONSUMER_NAME,
                 pull::Config {
-                    durable_name: Some("ack-all-consumer".to_string()),
+                    durable_name: Some(CONSUMER_NAME.to_string()),
                     ..Default::default()
                 },
             )
