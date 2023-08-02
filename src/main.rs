@@ -16,6 +16,7 @@ mod env;
 mod health;
 mod message_consumer;
 mod object_stores;
+mod performance;
 mod serve;
 mod units;
 

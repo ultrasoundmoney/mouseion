@@ -16,13 +16,11 @@ fn build_ovh_store(bucket_name: &str) -> Result<AmazonS3> {
         .with_secret_access_key(env::get_env_var_unsafe("S3_SECRET_ACCESS_KEY"))
         .with_access_key_id("3a7f56c872164eeb9ea200823ad7b403")
         .build()?;
-
     Ok(object_store)
 }
 
 fn build_local_file_store() -> Result<LocalFileSystem> {
     let object_store = LocalFileSystem::new_with_prefix("/tmp/")?;
-
     Ok(object_store)
 }
 
@@ -40,5 +38,6 @@ pub fn build_env_based_store(env_config: &EnvConfig) -> Result<Box<dyn ObjectSto
         }
     };
 
+    info!(bucket_name, "using OVH store");
     Ok(Box::new(build_ovh_store(bucket_name)?))
 }

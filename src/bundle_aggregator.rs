@@ -47,7 +47,7 @@ pub struct SlotBundle {
     // Earliest is when we first saw an execution payload for the slot these payloads are for.
     earliest: DateTime<Utc>,
     execution_payloads: Vec<JsonValue>,
-    slot: Slot,
+    pub slot: Slot,
 }
 
 impl SlotBundle {

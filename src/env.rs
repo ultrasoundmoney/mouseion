@@ -82,6 +82,7 @@ pub fn get_env_bool(key: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
     pub env: Env,
+    pub log_perf: bool,
     pub s3_secret_access_key: String,
     pub use_local_store: bool,
 }
@@ -89,6 +90,7 @@ pub struct EnvConfig {
 fn get_env_config() -> EnvConfig {
     EnvConfig {
         env: get_env(),
+        log_perf: get_env_bool("LOG_PERF"),
         s3_secret_access_key: get_env_var_unsafe("S3_SECRET_ACCESS_KEY"),
         use_local_store: get_env_bool("USE_LOCAL_STORE"),
     }

@@ -921,6 +921,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "object_store",
+ "pin-project",
  "serde",
  "serde_json",
  "tokio",
