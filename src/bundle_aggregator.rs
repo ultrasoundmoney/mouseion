@@ -192,8 +192,8 @@ impl BundleAggregator {
                 trace!("no slot bundles are old enough to archive, sleeping..");
             } else {
                 info!(
-                    "{} slot bundles are old enough with slots far enough in the past to archive",
-                    complete_bundles.len()
+                    count = complete_bundles.len(),
+                    "bundles are old enough with slots far enough in the past to archive",
                 );
                 for (slot, bundle) in complete_bundles {
                     trace!(%slot, "sending aggregated bundle");
