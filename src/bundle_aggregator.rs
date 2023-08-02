@@ -7,15 +7,19 @@ use std::{collections::HashMap, io::Write, time::Duration};
 
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::message::Acker;
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use flate2::{write::GzEncoder, Compression};
-use futures::{channel::mpsc, future::try_join_all, SinkExt};
+use futures::{
+    channel::mpsc::{self, Receiver},
+    future::try_join_all,
+    SinkExt, StreamExt,
+};
 use lazy_static::lazy_static;
 use object_store::path::Path;
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace};
 
-use crate::units::Slot;
+use crate::{messages::AckablePayload, units::Slot};
 
 type JsonValue = serde_json::Value;
 
@@ -37,7 +41,8 @@ lazy_static! {
 
 // Archive bundles, bundle together all execution payloads which share a slot. In addition, they
 // store when we first and last, saw an execution payload for this slot.
-pub struct ArchiveBundle {
+pub struct SlotBundle {
+    // Used to Ack all messages linked to the bundle.
     ackers: Vec<Acker>,
     // Earliest is when we first saw an execution payload for the slot these payloads are for.
     earliest: DateTime<Utc>,
@@ -45,22 +50,25 @@ pub struct ArchiveBundle {
     slot: Slot,
 }
 
-impl ArchiveBundle {
+impl SlotBundle {
     pub fn path(&self) -> Path {
         let slot = self.slot;
         let slot_date_time = slot.date_time();
         let year = slot_date_time.year();
         let month = slot_date_time.month();
         let day = slot_date_time.day();
+        let hour = slot_date_time.hour();
+        let minute = slot_date_time.minute();
         let slot = slot.to_string();
-        let path_string = format!("{year}/{month}/{day}/{slot}.ndjson.gz");
+        let path_string =
+            format!("{year}/{month:02}/{day:02}/{hour:02}/{minute:02}/{slot}.ndjson.gz");
         Path::from(path_string)
     }
 
     fn to_ndjson(&self) -> Result<String> {
         let mut ndjson = String::new();
         for execution_payload in self.execution_payloads.iter() {
-            ndjson.push_str(&serde_json::to_string(&execution_payload)?);
+            ndjson.push_str(&serde_json::to_string(execution_payload)?);
             ndjson.push('\n');
         }
         Ok(ndjson)
@@ -74,48 +82,41 @@ impl ArchiveBundle {
     }
 
     pub async fn ack(&self) -> Result<()> {
-        let mut tasks = Vec::new();
-
-        for acker in &self.ackers {
-            tasks.push(acker.ack())
-        }
-
-        try_join_all(tasks).await.map_err(|e| anyhow!(e))?;
+        try_join_all(self.ackers.iter().map(|acker| acker.ack()))
+            .await
+            .map_err(|e| anyhow!(e))?;
 
         Ok(())
     }
 }
 
 pub struct BundleAggregator {
-    slot_bundles: RwLock<HashMap<Slot, ArchiveBundle>>,
-    tx: mpsc::UnboundedSender<ArchiveBundle>,
+    slot_bundles: RwLock<HashMap<Slot, SlotBundle>>,
+    bundle_tx: mpsc::Sender<SlotBundle>,
 }
 
 impl BundleAggregator {
-    pub fn new(tx: mpsc::UnboundedSender<ArchiveBundle>) -> Self {
+    pub fn new(bundle_tx: mpsc::Sender<SlotBundle>) -> Self {
         Self {
             slot_bundles: RwLock::new(HashMap::new()),
-            tx,
+            bundle_tx,
         }
     }
 
-    pub async fn add_execution_payload(
-        &self,
-        slot: Slot,
-        acker: Acker,
-        execution_payload: serde_json::Value,
-    ) -> Result<()> {
+    async fn add_execution_payload(&self, (acker, archive_payload): AckablePayload) -> Result<()> {
         let mut slot_bundles = self.slot_bundles.write().await;
 
-        let slot_bundle = slot_bundles.entry(slot).or_insert_with(|| ArchiveBundle {
-            ackers: Vec::new(),
-            earliest: Utc::now(),
-            execution_payloads: Vec::new(),
-            slot,
-        });
+        let slot_bundle = slot_bundles
+            .entry(archive_payload.slot)
+            .or_insert_with(|| SlotBundle {
+                ackers: Vec::new(),
+                earliest: Utc::now(),
+                execution_payloads: Vec::new(),
+                slot: archive_payload.slot,
+            });
 
         slot_bundle.ackers.push(acker);
-        slot_bundle.execution_payloads.push(execution_payload);
+        slot_bundle.execution_payloads.push(archive_payload.payload);
 
         Ok(())
     }
@@ -149,7 +150,7 @@ impl BundleAggregator {
             .collect()
     }
 
-    pub async fn get_complete_bundles(&self) -> Result<Vec<(Slot, ArchiveBundle)>> {
+    async fn get_complete_bundles(&self) -> Result<Vec<(Slot, SlotBundle)>> {
         let complete_slots = self.find_complete_slots().await;
         let mut slot_bundles = self.slot_bundles.write().await;
         let mut complete_bundles = Vec::new();
@@ -161,7 +162,18 @@ impl BundleAggregator {
         Ok(complete_bundles)
     }
 
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run_consume_bundles(
+        &self,
+        mut message_rx: Receiver<AckablePayload>,
+    ) -> Result<()> {
+        while let Some(ackable_payload) = message_rx.next().await {
+            self.add_execution_payload(ackable_payload).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn run_complete_bundle_check(&self) -> Result<()> {
         debug!(
             "starting bundle aggregator, on a {:?} interval",
             AGGREGATION_INTERVAL_DURATION
@@ -169,7 +181,7 @@ impl BundleAggregator {
 
         let mut interval = tokio::time::interval(AGGREGATION_INTERVAL_DURATION);
 
-        let mut tx = &self.tx;
+        let mut tx = self.bundle_tx.clone();
 
         loop {
             interval.tick().await;
@@ -189,5 +201,27 @@ impl BundleAggregator {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_to_ndjson() -> Result<()> {
+        let slot_bundle = SlotBundle {
+            ackers: vec![],
+            earliest: Utc::now(),
+            execution_payloads: vec![
+                serde_json::json!({"foo": "bar"}),
+                serde_json::json!({"baz": "qux"}),
+            ],
+            slot: Slot(10),
+        };
+        let ndjson = slot_bundle.to_ndjson()?;
+        assert_eq!(ndjson, "{\"foo\":\"bar\"}\n{\"baz\":\"qux\"}\n");
+
+        Ok(())
     }
 }

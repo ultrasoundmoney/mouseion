@@ -3,9 +3,14 @@
 
 use std::env;
 
+use lazy_static::lazy_static;
 use tracing::{debug, warn};
 
 const SECRET_LOG_BLACKLIST: [&str; 1] = ["S3_SECRET_ACCESS_KEY"];
+
+lazy_static! {
+    pub static ref ENV_CONFIG: EnvConfig = get_env_config();
+}
 
 fn obfuscate_if_secret(blacklist: &[&str], key: &str, value: &str) -> String {
     if blacklist.contains(&key) {
@@ -42,7 +47,7 @@ pub fn get_env_var_unsafe(key: &str) -> String {
 
 /// Some things are different between environments. Urls we contact, timeouts we use, data we have.
 /// This enum is the main way to create these branches in our logic.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Env {
     Dev,
     Prod,
@@ -70,11 +75,23 @@ pub fn get_env() -> Env {
     }
 }
 
-#[cfg(test)]
 pub fn get_env_bool(key: &str) -> bool {
-    let flag = get_env_var(key).map_or(false, |var| var.to_lowercase() == "true");
-    debug!("env flag {key}: {flag}");
-    flag
+    get_env_var(key).map_or(false, |var| var.to_lowercase() == "true")
+}
+
+#[derive(Debug, Clone)]
+pub struct EnvConfig {
+    pub env: Env,
+    pub s3_secret_access_key: String,
+    pub use_local_store: bool,
+}
+
+fn get_env_config() -> EnvConfig {
+    EnvConfig {
+        env: get_env(),
+        s3_secret_access_key: get_env_var_unsafe("S3_SECRET_ACCESS_KEY"),
+        use_local_store: get_env_bool("USE_LOCAL_STORE"),
+    }
 }
 
 #[cfg(test)]
@@ -83,12 +100,12 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn get_env_var_unsafe_panics_test() {
+    fn test_get_env_var_unsafe_panics() {
         get_env_var_unsafe("DOESNT_EXIST");
     }
 
     #[test]
-    fn get_env_var_unsafe_test() {
+    fn test_get_env_var_unsafe() {
         let test_key = "TEST_KEY_UNSAFE";
         let test_value = "my-env-value";
         std::env::set_var(test_key, test_value);
@@ -96,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn get_env_var_safe_some_test() {
+    fn test_get_env_var_safe_some() {
         let test_key = "TEST_KEY_SAFE_SOME";
         let test_value = "my-env-value";
         std::env::set_var(test_key, test_value);
@@ -104,19 +121,19 @@ mod tests {
     }
 
     #[test]
-    fn get_env_var_safe_none_test() {
+    fn test_get_env_var_safe_none() {
         let key = get_env_var("DOESNT_EXIST");
         assert!(key.is_none());
     }
 
     #[test]
-    fn get_env_bool_not_there_test() {
+    fn test_get_env_bool_not_there() {
         let flag = get_env_bool("DOESNT_EXIST");
         assert!(!flag);
     }
 
     #[test]
-    fn get_env_bool_true_test() {
+    fn test_get_env_bool_true() {
         let test_key = "TEST_KEY_BOOL_TRUE";
         let test_value = "true";
         std::env::set_var(test_key, test_value);
@@ -124,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn get_env_bool_true_upper_test() {
+    fn test_get_env_bool_true_upper() {
         let test_key = "TEST_KEY_BOOL_TRUE2";
         let test_value = "TRUE";
         std::env::set_var(test_key, test_value);
@@ -132,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn get_env_bool_false_test() {
+    fn test_get_env_bool_false() {
         let test_key = "TEST_KEY_BOOL_FALSE";
         let test_value = "false";
         std::env::set_var(test_key, test_value);
@@ -140,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn get_env_test() {
+    fn test_get_env() {
         std::env::set_var("ENV", "dev");
         assert_eq!(get_env(), Env::Dev);
 
@@ -168,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn obfuscate_if_secret_test() {
+    fn test_obfuscate_if_secret() {
         let secret_key = "SECRET_KEY";
         let blacklist = vec![secret_key];
         assert_eq!(

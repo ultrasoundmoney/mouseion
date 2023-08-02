@@ -1,44 +1,45 @@
+//! # Payload Archiver
+//! Takes the many execution payloads that the relay receives, over a message queue, bundles them
+//! by slot, and stores them in cheap Object Storage.
+//!
+//! ## Architecture
+//! The archiver is composed of three main components:
+//! - A message consumer, which consumes messages from the message queue, and puts them on the
+//!   ackable payload queue.
+//! - A bundle aggregator, takes ackable payloads, and aggregates them into bundles by slot.
+//!   Complete bundles are put on the bundle queue.
+//! - An object storage, which takes bundles from the bundle queue, and stores them in object
+//!   storage.
 mod bundle_aggregator;
+mod bundle_shipper;
 mod env;
 mod health;
 mod messages;
-mod object_storage;
+mod object_stores;
 mod serve;
 mod units;
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
-use bundle_aggregator::ArchiveBundle;
-use futures::{channel::mpsc, try_join, FutureExt, StreamExt};
+use bundle_aggregator::SlotBundle;
+use futures::{
+    channel::mpsc::{self, Receiver, Sender},
+    try_join,
+};
 use health::{MessageHealth, NatsHealth};
-use object_store::ObjectStore;
 use tracing::info;
 
-use crate::bundle_aggregator::BundleAggregator;
+use crate::{
+    bundle_aggregator::BundleAggregator,
+    bundle_shipper::BundleShipper,
+    messages::{AckablePayload, MessageConsumer},
+};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
-    message_health: MessageHealth,
-    nats_client: async_nats::Client,
+    message_health: Arc<MessageHealth>,
     nats_health: NatsHealth,
-}
-
-async fn run_object_storage(
-    object_store: impl ObjectStore,
-    mut rx: mpsc::UnboundedReceiver<ArchiveBundle>,
-) -> Result<()> {
-    while let Some(archive_bundle) = rx.next().await {
-        object_store
-            .put(
-                &archive_bundle.path(),
-                archive_bundle.to_ndjson_gz()?.into(),
-            )
-            .await?;
-
-        // Bundle has been successfully stored, ack the messages.
-        archive_bundle.ack().await?;
-    }
-
-    Ok(())
 }
 
 #[tokio::main]
@@ -47,38 +48,53 @@ async fn main() -> Result<()> {
 
     info!("starting payload archiver");
 
+    let env_config = &env::ENV_CONFIG;
+
     let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
     let nats_client = async_nats::connect(nats_uri)
         .await
         .context("connecting to NATS")?;
 
-    let (tx, rx) = mpsc::unbounded();
-    let bundle_aggregator = BundleAggregator::new(tx);
-
-    let object_store = object_storage::build_ovh_object_store()?;
-
     let nats_health = NatsHealth::new(nats_client.clone());
-    let message_health = MessageHealth::new();
+    let message_health = Arc::new(MessageHealth::new());
+
+    // Ackable payload queue
+    type MessageQueue = (Sender<AckablePayload>, Receiver<AckablePayload>);
+    let (ackable_payload_tx, ackable_payload_rx): MessageQueue = mpsc::channel(512);
+    let message_consumer =
+        MessageConsumer::new(message_health.clone(), nats_client, ackable_payload_tx).await;
+
+    // Bundle queue
+    type BundleQueue = (Sender<SlotBundle>, Receiver<SlotBundle>);
+    let (bundle_tx, bundle_rx): BundleQueue = mpsc::channel(16);
+    let bundle_aggregator = BundleAggregator::new(bundle_tx);
+
+    let object_store = object_stores::build_env_based_store(env_config)?;
+    let mut bundle_shipper = BundleShipper::new(bundle_rx, object_store);
 
     let app_state = AppState {
-        nats_client,
         nats_health,
         message_health,
     };
 
-    let messages_thread = messages::process_messages(app_state.clone(), &bundle_aggregator);
+    let messages_thread = message_consumer.run();
 
-    let bundle_aggregator_thread = bundle_aggregator.run();
+    let bundle_aggregator_complete_bundle_check_thread =
+        bundle_aggregator.run_complete_bundle_check();
+
+    let bundle_aggregator_consume_bundles_thread =
+        bundle_aggregator.run_consume_bundles(ackable_payload_rx);
 
     let server_thread = serve::serve(app_state);
 
-    let object_storage_thread = tokio::spawn(run_object_storage(object_store, rx));
+    let bundle_shipper_thread = bundle_shipper.run();
 
     try_join!(
         messages_thread,
         server_thread,
-        bundle_aggregator_thread,
-        object_storage_thread.map(|res| res?)
+        bundle_aggregator_complete_bundle_check_thread,
+        bundle_aggregator_consume_bundles_thread,
+        bundle_shipper_thread,
     )
     .context("joining message, server, and bundle_aggregator tasks, and object storage thread")?;
 

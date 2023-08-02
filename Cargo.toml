@@ -1,6 +1,6 @@
 [package]
 name = "payload-archiver"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
@@ -10,7 +10,6 @@ async-trait = "0.1"
 axum = "0.6"
 bytes = "1"
 chrono = { version = "0.4", features = [] }
-csv = "1"
 flate2 = "1"
 futures = "0.3"
 lazy_static = "1"

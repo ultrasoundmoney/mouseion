@@ -1,30 +1,33 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 
 use lazy_static::lazy_static;
 
-use crate::env::{self, Env};
+use crate::env::{Env, ENV_CONFIG};
 
 use super::HealthCheck;
 
 #[derive(Debug, Clone)]
 pub struct MessageHealth {
-    last_message_received: Arc<Mutex<Option<Instant>>>,
+    last_message_received: Arc<RwLock<Option<Instant>>>,
     started_on: Instant,
 }
 
 impl MessageHealth {
     pub fn new() -> Self {
         Self {
-            last_message_received: Arc::new(Mutex::new(None)),
+            last_message_received: Arc::new(RwLock::new(None)),
             started_on: Instant::now(),
         }
     }
 
     fn set_last_message_received(&self, instant: Instant) {
-        self.last_message_received.lock().unwrap().replace(instant);
+        self.last_message_received
+            .write()
+            .expect("unable to write last message received")
+            .replace(instant);
     }
 
     pub fn set_last_message_received_now(&self) {
@@ -33,7 +36,7 @@ impl MessageHealth {
 }
 
 lazy_static! {
-    static ref MAX_SILENCE_DURATION: Duration = match env::get_env() {
+    static ref MAX_SILENCE_DURATION: Duration = match ENV_CONFIG.env {
         Env::Dev => Duration::from_secs(60),
         Env::Stag => Duration::from_secs(60),
         Env::Prod => Duration::from_secs(24),
@@ -42,15 +45,21 @@ lazy_static! {
 
 impl HealthCheck for MessageHealth {
     fn health_status(&self) -> (bool, String) {
-        let time_since_start = Instant::now() - self.started_on;
+        let now = Instant::now();
+        let time_since_start = now - self.started_on;
 
         // To avoid blocking the constant writes to this value we clone.
-        let last_message_recieved_clone = *self
-            .last_message_received
-            .lock()
-            .expect("expect to acquire lock on last_message_received in health check");
-        let time_since_last_message =
-            last_message_recieved_clone.map(|instant| Instant::now() - instant);
+        let last_message_received_clone = match self.last_message_received.read() {
+            Ok(last_message_received) => *last_message_received,
+            Err(_) => {
+                return (
+                    false,
+                    "unhealthy, unable to read last message received".to_string(),
+                )
+            }
+        };
+
+        let time_since_last_message = last_message_received_clone.map(|instant| now - instant);
 
         match time_since_last_message {
             None => {
