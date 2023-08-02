@@ -68,11 +68,6 @@ async fn main() -> Result<()> {
     let object_store = object_stores::build_env_based_store(env_config)?;
     let mut bundle_shipper = BundleShipper::new(bundle_rx, object_store);
 
-    let app_state = AppState {
-        nats_health,
-        message_health,
-    };
-
     let messages_thread = message_consumer.run();
 
     let bundle_aggregator_complete_bundle_check_thread =
@@ -80,6 +75,11 @@ async fn main() -> Result<()> {
 
     let bundle_aggregator_consume_bundles_thread =
         bundle_aggregator.run_consume_bundles(ackable_payload_rx);
+
+    let app_state = AppState {
+        nats_health,
+        message_health,
+    };
 
     let server_thread = serve::serve(app_state);
 
