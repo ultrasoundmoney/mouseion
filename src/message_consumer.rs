@@ -10,7 +10,7 @@ use futures::{channel::mpsc, SinkExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, trace};
 
-use crate::{health::MessageHealth, units::Slot};
+use crate::{health::MessageConsumerHealth, units::Slot};
 
 type JsonValue = serde_json::Value;
 
@@ -38,14 +38,14 @@ pub struct ArchivePayload {
 pub type AckablePayload = (Acker, ArchivePayload);
 
 pub struct MessageConsumer {
-    message_health: Arc<MessageHealth>,
+    message_health: Arc<MessageConsumerHealth>,
     nats_client: async_nats::Client,
     archive_payload_tx: mpsc::Sender<AckablePayload>,
 }
 
 impl MessageConsumer {
     pub async fn new(
-        message_health: Arc<MessageHealth>,
+        message_health: Arc<MessageConsumerHealth>,
         nats_client: async_nats::Client,
         archive_payload_tx: mpsc::Sender<AckablePayload>,
     ) -> Self {

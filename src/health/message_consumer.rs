@@ -10,12 +10,12 @@ use crate::env::{Env, ENV_CONFIG};
 use super::HealthCheck;
 
 #[derive(Debug, Clone)]
-pub struct MessageHealth {
+pub struct MessageConsumerHealth {
     last_message_received: Arc<RwLock<Option<Instant>>>,
     started_on: Instant,
 }
 
-impl MessageHealth {
+impl MessageConsumerHealth {
     pub fn new() -> Self {
         Self {
             last_message_received: Arc::new(RwLock::new(None)),
@@ -43,7 +43,7 @@ lazy_static! {
     };
 }
 
-impl HealthCheck for MessageHealth {
+impl HealthCheck for MessageConsumerHealth {
     fn health_status(&self) -> (bool, String) {
         let now = Instant::now();
         let time_since_start = now - self.started_on;

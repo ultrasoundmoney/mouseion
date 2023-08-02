@@ -19,7 +19,7 @@ use object_store::path::Path;
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace};
 
-use crate::{messages::AckablePayload, units::Slot};
+use crate::{message_consumer::AckablePayload, units::Slot};
 
 type JsonValue = serde_json::Value;
 

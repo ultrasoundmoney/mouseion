@@ -14,7 +14,7 @@ mod bundle_aggregator;
 mod bundle_shipper;
 mod env;
 mod health;
-mod messages;
+mod message_consumer;
 mod object_stores;
 mod serve;
 mod units;
@@ -27,18 +27,18 @@ use futures::{
     channel::mpsc::{self, Receiver, Sender},
     try_join,
 };
-use health::{MessageHealth, NatsHealth};
+use health::{MessageConsumerHealth, NatsHealth};
 use tracing::info;
 
 use crate::{
     bundle_aggregator::BundleAggregator,
     bundle_shipper::BundleShipper,
-    messages::{AckablePayload, MessageConsumer},
+    message_consumer::{AckablePayload, MessageConsumer},
 };
 
 #[derive(Debug, Clone)]
 pub struct AppState {
-    message_health: Arc<MessageHealth>,
+    message_health: Arc<MessageConsumerHealth>,
     nats_health: NatsHealth,
 }
 
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
         .context("connecting to NATS")?;
 
     let nats_health = NatsHealth::new(nats_client.clone());
-    let message_health = Arc::new(MessageHealth::new());
+    let message_health = Arc::new(MessageConsumerHealth::new());
 
     // Ackable payload queue
     type MessageQueue = (Sender<AckablePayload>, Receiver<AckablePayload>);

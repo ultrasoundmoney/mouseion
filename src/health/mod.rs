@@ -1,7 +1,7 @@
-mod message;
+mod message_consumer;
 mod nats;
 
-pub use message::MessageHealth;
+pub use message_consumer::MessageConsumerHealth;
 pub use nats::NatsHealth;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
