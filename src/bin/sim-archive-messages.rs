@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use async_nats::jetstream;
-use tracing::info;
+use tracing::{debug, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
     let messages_len = messages.len();
 
     for payload in messages {
+        debug!("publishing payload for slot: {:?}", payload["slot"]);
         nats_context
             .publish(
                 "payload-archive".to_string(),
