@@ -7,10 +7,11 @@ use std::{collections::HashMap, io::Write, time::Duration};
 
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::message::Acker;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use flate2::{write::GzEncoder, Compression};
 use futures::{channel::mpsc, future::try_join_all, SinkExt};
 use lazy_static::lazy_static;
+use object_store::path::Path;
 use tokio::sync::RwLock;
 use tracing::{debug, info, trace};
 
@@ -41,19 +42,21 @@ pub struct ArchiveBundle {
     // Earliest is when we first saw an execution payload for the slot these payloads are for.
     earliest: DateTime<Utc>,
     execution_payloads: Vec<JsonValue>,
-}
-
-impl Default for ArchiveBundle {
-    fn default() -> Self {
-        Self {
-            ackers: Vec::new(),
-            earliest: Utc::now(),
-            execution_payloads: Vec::new(),
-        }
-    }
+    slot: Slot,
 }
 
 impl ArchiveBundle {
+    pub fn path(&self) -> Path {
+        let slot = self.slot;
+        let slot_date_time = slot.date_time();
+        let year = slot_date_time.year();
+        let month = slot_date_time.month();
+        let day = slot_date_time.day();
+        let slot = slot.to_string();
+        let path_string = format!("{year}/{month}/{day}/{slot}.ndjson.gz");
+        Path::from(path_string)
+    }
+
     fn to_ndjson(&self) -> Result<String> {
         let mut ndjson = String::new();
         for execution_payload in self.execution_payloads.iter() {
@@ -83,15 +86,13 @@ impl ArchiveBundle {
     }
 }
 
-type SlotArchiveBundlePair = (Slot, ArchiveBundle);
-
 pub struct BundleAggregator {
     slot_bundles: RwLock<HashMap<Slot, ArchiveBundle>>,
-    tx: mpsc::UnboundedSender<SlotArchiveBundlePair>,
+    tx: mpsc::UnboundedSender<ArchiveBundle>,
 }
 
 impl BundleAggregator {
-    pub fn new(tx: mpsc::UnboundedSender<SlotArchiveBundlePair>) -> Self {
+    pub fn new(tx: mpsc::UnboundedSender<ArchiveBundle>) -> Self {
         Self {
             slot_bundles: RwLock::new(HashMap::new()),
             tx,
@@ -106,9 +107,12 @@ impl BundleAggregator {
     ) -> Result<()> {
         let mut slot_bundles = self.slot_bundles.write().await;
 
-        let slot_bundle = slot_bundles
-            .entry(slot)
-            .or_insert_with(ArchiveBundle::default);
+        let slot_bundle = slot_bundles.entry(slot).or_insert_with(|| ArchiveBundle {
+            ackers: Vec::new(),
+            earliest: Utc::now(),
+            execution_payloads: Vec::new(),
+            slot,
+        });
 
         slot_bundle.ackers.push(acker);
         slot_bundle.execution_payloads.push(execution_payload);
@@ -181,7 +185,7 @@ impl BundleAggregator {
                 );
                 for (slot, bundle) in complete_bundles {
                     trace!(%slot, "sending aggregated bundle");
-                    tx.send((slot, bundle)).await?;
+                    tx.send(bundle).await?;
                 }
             }
         }
