@@ -1,3 +1,3 @@
 # Payload Archiver
 
-Takes payloads from a NATS message queue and archives them in a cheap storage bucket.
+Takes the many execution payloads that the relay receives, over a message queue, bundles them by slot, and stores them in cheap Object Storage.
