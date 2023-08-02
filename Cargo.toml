@@ -4,13 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-nats = "0.30"
+anyhow = { version = "1", features = ["backtrace"] }
+async-nats = "0.31"
+async-trait = "0.1"
 axum = "0.6"
-bytes = "1.4"
-eyre = "0.6"
+bytes = "1"
+chrono = { version = "0.4", features = [] }
+csv = "1"
+flate2 = "1"
 futures = "0.3"
-lazy_static = "1.4"
-serde_json = "1.0"
-tokio = { version = "1.29", features = ["full"] }
+lazy_static = "1"
+object_store = { version = "0.6", features = ["aws"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"

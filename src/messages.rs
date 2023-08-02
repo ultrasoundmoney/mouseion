@@ -1,21 +1,39 @@
+use anyhow::{anyhow, Result};
 use async_nats::jetstream::{
     self,
     consumer::pull::{self},
 };
-use eyre::{eyre, Context, Result};
 use futures::TryStreamExt;
-use serde_json::Value;
-use tracing::{debug, info};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info, trace};
 
-use crate::AppState;
+use crate::{bundle_aggregator::BundleAggregator, units::Slot, AppState};
 
-const STREAM_NAME: &str = "payload-archive";
+type JsonValue = serde_json::Value;
 
-pub async fn process_messages(state: AppState) -> Result<()> {
-    info!("starting message processing");
+pub const STREAM_NAME: &str = "payload-archive";
 
+#[derive(Debug, Deserialize, Serialize)]
+struct Withdrawal {
+    address: String,
+    amount: String,
+    index: String,
+    validator_index: String,
+}
+
+// Archive messages carry a slot number, and a execution payload. The slot number is used to make
+// storage simple. Bundle messages with the same slot number together. The execution payload is
+// what we receive from builders. This also means we do not handle re-orgs, but store all data.
+#[derive(Debug, Serialize, Deserialize)]
+struct ArchivePayload {
+    // To avoid unneccesary work we do not deserialize the payload.
+    payload: JsonValue,
+    slot: Slot,
+}
+
+pub async fn process_messages(state: AppState, bundle_aggregator: &BundleAggregator) -> Result<()> {
+    debug!("connecting to NATS");
     let nats_context = jetstream::new(state.nats_client);
-
     let stream = nats_context.get_stream(STREAM_NAME).await?;
 
     let consumer = stream
@@ -28,35 +46,32 @@ pub async fn process_messages(state: AppState) -> Result<()> {
         )
         .await?;
 
+    info!("starting to process messages");
+
     let mut message_stream = consumer.messages().await?;
     while let Some(message) = message_stream.try_next().await? {
+        trace!(?message, "received message");
         let (message, acker) = message.split();
-
-        // Acknowledge the message
-        let ack_handle = tokio::spawn(async move {
-            acker
-                .ack()
-                .await
-                .map_err(|e| eyre!(e))
-                .context("trying to ack message")
-        });
 
         // Get block_number and state_root from message payload JSON
         let payload = message.payload;
-        let payload_json = serde_json::from_slice::<Value>(&payload)?;
-        let block_number = payload_json["block_number"]
-            .as_str()
-            .ok_or_else(|| eyre!("block_number missing from payload"))?
-            .parse::<u64>()
-            .context("failed to parse block_number string as u64")?;
-        let state_root = payload_json["state_root"]
-            .as_str()
-            .ok_or_else(|| eyre!("state_root missing from payload"))?;
+        let archive_payload = serde_json::from_slice::<ArchivePayload>(&payload)?;
 
-        debug!(block_number, state_root, "acked payload");
+        let state_root = archive_payload
+            .payload
+            .get("state_root")
+            .ok_or_else(|| anyhow!("state_root not found in payload"))?
+            .as_str()
+            .ok_or_else(|| anyhow!("state_root is not a string"))?;
 
-        // Wait for ack to be completed before moving to next message.
-        ack_handle.await.context("joining ack message thread")??;
+        debug!(
+            slot = %archive_payload.slot,
+            state_root, "received new execution payload"
+        );
+
+        bundle_aggregator
+            .add_execution_payload(archive_payload.slot, acker, archive_payload.payload)
+            .await?;
 
         // Update last_message_received to now
         state.message_health.set_last_message_received_now();

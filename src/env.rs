@@ -5,7 +5,7 @@ use std::env;
 
 use tracing::{debug, warn};
 
-const SECRET_LOG_BLACKLIST: [&str; 0] = [];
+const SECRET_LOG_BLACKLIST: [&str; 1] = ["S3_SECRET_ACCESS_KEY"];
 
 fn obfuscate_if_secret(blacklist: &[&str], key: &str, value: &str) -> String {
     if blacklist.contains(&key) {
@@ -35,7 +35,6 @@ pub fn get_env_var(key: &str) -> Option<String> {
     var
 }
 
-#[cfg(test)]
 /// Get an environment variable we can't run without.
 pub fn get_env_var_unsafe(key: &str) -> String {
     get_env_var(key).unwrap_or_else(|| panic!("{key} should be in env"))

@@ -1,5 +1,5 @@
+use anyhow::{Context, Result};
 use axum::{routing::get, Router, Server};
-use eyre::{Context, Result};
 use tracing::info;
 
 use crate::{env, health::get_livez, AppState};
