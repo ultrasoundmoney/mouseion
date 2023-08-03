@@ -4,13 +4,20 @@ use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
+use crate::env::{Network, ENV_CONFIG};
+
 // Beacon chain slots are defined as 12 second periods starting from genesis. With u32 our program
 // would overflow when the slot number passes 2_147_483_647. i32::MAX * 12 seconds = ~817 years.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Slot(pub i32);
 
 lazy_static! {
-    static ref GENESIS_TIMESTAMP: DateTime<Utc> = "2020-12-01T12:00:23Z".parse().unwrap();
+    static ref GENESIS_TIMESTAMP: DateTime<Utc> = {
+        match ENV_CONFIG.network {
+            Network::Mainnet => "2020-12-01T12:00:23Z".parse().unwrap(),
+            Network::Goerli => "2021-03-23T14:00:00Z".parse().unwrap()
+        }
+    };
     // We can't know whether a builder will submit a payload for a slot late. Although builders
     // should submit bids well before t+2 of a slot, proposers may be late. We allow a maximum t+12
     // seconds, _plus_ a buffer just to be extra sure we've received all payloads. The value below

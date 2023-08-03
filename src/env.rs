@@ -79,9 +79,31 @@ pub fn get_env_bool(key: &str) -> bool {
     get_env_var(key).map_or(false, |var| var.to_lowercase() == "true")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Network {
+    Mainnet,
+    Goerli,
+}
+
+pub fn get_network() -> Network {
+    let network_str = get_env_var("NETWORK");
+    match network_str {
+        None => {
+            warn!("no NETWORK in env, assuming Mainnet");
+            Network::Mainnet
+        }
+        Some(str) => match str.to_lowercase().as_ref() {
+            "mainnet" => Network::Mainnet,
+            "goerli" => Network::Goerli,
+            _ => panic!("NETWORK present: {str}, but not one of [mainnet, goerli], panicking!"),
+        },
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
     pub env: Env,
+    pub network: Network,
     pub log_perf: bool,
     pub s3_secret_access_key: String,
     pub use_local_store: bool,
@@ -90,6 +112,7 @@ pub struct EnvConfig {
 fn get_env_config() -> EnvConfig {
     EnvConfig {
         env: get_env(),
+        network: get_network(),
         log_perf: get_env_bool("LOG_PERF"),
         s3_secret_access_key: get_env_var_unsafe("S3_SECRET_ACCESS_KEY"),
         use_local_store: get_env_bool("USE_LOCAL_STORE"),
@@ -200,5 +223,27 @@ mod tests {
             obfuscate_if_secret(&blacklist, normal_key, "my_normal_value"),
             "my_normal_value"
         );
+    }
+
+    #[test]
+    fn test_get_network() {
+        std::env::set_var("NETWORK", "mainnet");
+        assert_eq!(get_network(), Network::Mainnet);
+
+        std::env::set_var("NETWORK", "goerli");
+        assert_eq!(get_network(), Network::Goerli);
+
+        std::env::set_var("NETWORK", "Mainnet");
+        assert_eq!(get_network(), Network::Mainnet);
+
+        std::env::set_var("NETWORK", "Goerli");
+        assert_eq!(get_network(), Network::Goerli);
+
+        std::env::remove_var("NETWORK");
+        assert_eq!(get_network(), Network::Mainnet);
+
+        std::env::set_var("NETWORK", "invalid_network");
+        let result = std::panic::catch_unwind(|| get_network());
+        assert!(result.is_err());
     }
 }
