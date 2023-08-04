@@ -25,10 +25,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use futures::{
     channel::mpsc::{self},
-    try_join,
+    select, FutureExt,
 };
 use health::{MessageConsumerHealth, NatsHealth};
-use tracing::info;
+use tokio::{sync::Notify, try_join};
+use tracing::{error, info};
 
 use crate::{
     bundle_aggregator::BundleAggregator, bundle_shipper::BundleShipper,
@@ -47,6 +48,8 @@ async fn main() -> Result<()> {
 
     info!("starting payload archiver");
 
+    let shutdown_notify = Arc::new(Notify::new());
+
     let env_config = &env::ENV_CONFIG;
 
     let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
@@ -64,38 +67,115 @@ async fn main() -> Result<()> {
 
     // Bundle queue
     let (bundle_tx, bundle_rx) = mpsc::channel(16);
-    let bundle_aggregator = BundleAggregator::new(bundle_tx);
+    let bundle_aggregator = Arc::new(BundleAggregator::new(bundle_tx));
+    let bundle_aggregator_clone = bundle_aggregator.clone();
 
     let object_store = object_stores::build_env_based_store(env_config)?;
     let mut bundle_shipper = BundleShipper::new(bundle_rx, object_store);
 
-    let messages_thread = message_consumer.run();
+    let message_consumer_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            select! {
+                result = message_consumer.run().fuse() => {
+                    match result {
+                        Ok(_) => info!("message consumer stopped"),
+                        Err(e) => error!(%e, "message consumer exited with error"),
+                    }
+                    shutdown_notify.notify_waiters();
+                }
+                _ = shutdown_notify.notified().fuse() => {
+                    info!("message consumer shutting down");
+                }
+            }
+        }
+    });
 
-    let bundle_aggregator_complete_bundle_check_thread =
-        bundle_aggregator.run_complete_bundle_check();
+    let bundle_aggregator_complete_bundle_check_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            select! {
+                result = bundle_aggregator.run_complete_bundle_check().fuse() => {
+                    match result {
+                        Ok(_) => info!("bundle aggregator bundle checking stopped"),
+                        Err(e) => {
+                            error!(%e, "bundle aggregator exited with error");
+                            shutdown_notify.notify_waiters();
+                        },
+                    }
+                }
+                _ = shutdown_notify.notified().fuse() => {
+                    info!("bundle aggregator shutting down");
+                }
+            }
+        }
+    });
 
-    let bundle_aggregator_consume_bundles_thread =
-        bundle_aggregator.run_consume_bundles(ackable_payload_rx);
+    let bundle_aggregator_consume_bundles_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            select! {
+                result = bundle_aggregator_clone.run_consume_ackable_payloads(ackable_payload_rx).fuse() => {
+                    match result {
+                        Ok(_) => info!("bundle aggregator stopped consuming ackable payloads"),
+                        Err(e) => {
+                            error!(%e, "bundle aggregator exited with error");
+                            shutdown_notify.notify_waiters();
+                        },
+                    }
+                }
+                _ = shutdown_notify.notified().fuse() => {
+                    info!("bundle aggregator shutting down");
+                }
+            }
+        }
+    });
 
     let app_state = AppState {
         nats_health,
         message_health,
     };
 
-    let server_thread = serve::serve(app_state);
+    let server_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            let result = serve::serve(app_state, shutdown_notify.clone()).await;
+            match result {
+                Ok(_) => info!("server exited"),
+                Err(e) => {
+                    error!(%e, "server exited with error");
+                    shutdown_notify.notify_waiters();
+                }
+            }
+        }
+    });
 
-    let bundle_shipper_thread = bundle_shipper.run();
+    let bundle_shipper_thread = tokio::spawn({
+        async move {
+            select! {
+                result = bundle_shipper.run().fuse() => {
+                    match result {
+                        Ok(_) => error!("bundle shipper exited unexpectedly"),
+                        Err(e) => {
+                            error!(%e, "bundle shipper exited with error");
+                            shutdown_notify.notify_waiters();
+                        },
+                    }
+                }
+                _ = shutdown_notify.notified().fuse() => {
+                    info!("bundle shipper shutting down");
+                }
+            }
+        }
+    });
 
     try_join!(
-        messages_thread,
-        server_thread,
         bundle_aggregator_complete_bundle_check_thread,
         bundle_aggregator_consume_bundles_thread,
         bundle_shipper_thread,
-    )
-    .context("joining message, server, and bundle_aggregator tasks, and object storage thread")?;
-
-    info!("payload archiver exiting");
+        message_consumer_thread,
+        server_thread,
+    )?;
 
     Ok(())
 }

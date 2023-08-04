@@ -162,11 +162,11 @@ impl BundleAggregator {
         Ok(complete_bundles)
     }
 
-    pub async fn run_consume_bundles(
+    pub async fn run_consume_ackable_payloads(
         &self,
-        mut message_rx: Receiver<AckablePayload>,
+        mut ackable_payload_rx: Receiver<AckablePayload>,
     ) -> Result<()> {
-        while let Some(ackable_payload) = message_rx.next().await {
+        while let Some(ackable_payload) = ackable_payload_rx.next().await {
             self.add_execution_payload(ackable_payload).await?;
         }
 
