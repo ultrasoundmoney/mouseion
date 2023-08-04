@@ -19,7 +19,10 @@ async fn main() -> Result<()> {
     let messages_len = messages.len();
 
     for payload in messages {
-        debug!("publishing payload for slot: {:?}", payload["slot"]);
+        debug!(
+            "publishing payload for slot: {:?}",
+            payload.get("slot").unwrap().as_u64().unwrap()
+        );
         nats_context
             .publish(
                 "payload-archive".to_string(),
