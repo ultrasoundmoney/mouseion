@@ -3,12 +3,11 @@
 //!
 //! Interesting performance trade-off is to do csv serialization and compression work as messages
 //! are received, or to buffer them by slot and do the work all at once, concurrently.
-use std::{collections::HashMap, io::Write, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::message::Acker;
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use flate2::{write::GzEncoder, Compression};
 use futures::{
     channel::mpsc::{self, Receiver},
     future::try_join_all,
@@ -65,20 +64,13 @@ impl SlotBundle {
         Path::from(path_string)
     }
 
-    fn to_ndjson(&self) -> Result<String> {
+    pub fn to_ndjson(&self) -> Result<String> {
         let mut ndjson = String::new();
         for execution_payload in self.execution_payloads.iter() {
             ndjson.push_str(&serde_json::to_string(execution_payload)?);
             ndjson.push('\n');
         }
         Ok(ndjson)
-    }
-
-    pub fn to_ndjson_gz(&self) -> Result<Vec<u8>> {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(self.to_ndjson()?.as_bytes())?;
-        let bytes = encoder.finish()?;
-        Ok(bytes)
     }
 
     pub async fn ack(&self) -> Result<()> {
