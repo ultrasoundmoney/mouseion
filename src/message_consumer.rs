@@ -68,6 +68,7 @@ impl MessageConsumer {
                 CONSUMER_NAME,
                 pull::Config {
                     durable_name: Some(CONSUMER_NAME.to_string()),
+                    max_ack_pending: 4800,
                     ..Default::default()
                 },
             )
