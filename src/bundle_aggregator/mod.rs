@@ -5,17 +5,16 @@
 //! are received, or to buffer them by slot and do the work all at once, concurrently.
 mod hashmap_size;
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::message::Acker;
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use futures::{
     channel::mpsc::{self, Receiver},
     future::try_join_all,
     FutureExt, SinkExt, StreamExt,
 };
-use lazy_static::lazy_static;
 use object_store::path::Path;
 use tokio::{
     select,
@@ -25,25 +24,13 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     message_consumer::AckablePayload,
-    operation_constants::{BUNDLE_MAX_AGE_BUFFER, MAX_INCOMPLETE_BUNDLES, MIN_BUNDLE_AGE},
+    operation_constants::{BUNDLE_MIN_AGE, BUNDLE_SLOT_MAX_AGE, MAX_INCOMPLETE_BUNDLES},
     units::Slot,
 };
 
 type JsonValue = serde_json::Value;
 
 const AGGREGATION_INTERVAL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
-/// Duration we sleep when we've reached the incomplete bundle limit.
-const BUNDLE_LIMIT_SLEEP_DURATION: Duration = Duration::from_secs(1);
-
-lazy_static! {
-    // Maximum age of a slot before we consider a bundle complete.
-    static ref BUNDLE_SLOT_AGE_LIMIT: Duration = Duration::from_secs(Slot::SECONDS_PER_SLOT.try_into().unwrap()) + BUNDLE_MAX_AGE_BUFFER;
-
-    // Once a message has been delivered to us, anything may go wrong, we only ack messages after
-    // they've been archived. If we fail to do so, we'd like NATS to redeliver the message. The age
-    // limit is therefore the maximum amount of time we expect a bundle to take to come together.
-    static ref REDELIVERY_AGE_LIMIT: Duration = Duration::from_secs(Slot::SECONDS_PER_SLOT.try_into().unwrap()) + BUNDLE_MAX_AGE_BUFFER;
-}
 
 // Archive bundles, bundle together all execution payloads which share a slot. In addition, they
 // store when we first and last, saw an execution payload for this slot.
@@ -138,8 +125,8 @@ impl BundleAggregator {
                 // there may be a backlog. We wait at least this long from the first moment we see
                 // a message for a slot, before we start archiving it, to make sure we've cleared any
                 // backlog.
-                let is_bundle_old_enough = Utc::now() - bundle.earliest
-                    >= chrono::Duration::from_std(MIN_BUNDLE_AGE).unwrap();
+                let is_bundle_old_enough =
+                    Utc::now() - bundle.earliest >= Duration::from_std(BUNDLE_MIN_AGE).unwrap();
 
                 // We only want to archive slots which are at least one slot old. This is to avoid
                 // archiving slots which are still being built. Normally the very first message for
@@ -147,10 +134,7 @@ impl BundleAggregator {
                 // very wrong, perhaps t+6. At t+12 it becomes impossible to collect enough
                 // attestations. Still, we may receive messages, so we allow for a very generous
                 // buffer. Shipping our bundle at t + 12 + 8 = t+20.
-                let is_past_slot = slot.date_time()
-                    + chrono::Duration::seconds(Slot::SECONDS_PER_SLOT.into())
-                    + chrono::Duration::from_std(BUNDLE_MAX_AGE_BUFFER).unwrap()
-                    < Utc::now();
+                let is_past_slot = slot.date_time() + *BUNDLE_SLOT_MAX_AGE < Utc::now();
 
                 is_bundle_old_enough && is_past_slot
             })
@@ -185,6 +169,12 @@ impl BundleAggregator {
         Ok(complete_bundles)
     }
 
+    async fn get_oldest_bundle(&self) -> Option<SlotBundle> {
+        let mut slot_bundles = self.slot_bundles.write().await;
+        let oldest_slot = slot_bundles.keys().min().cloned();
+        oldest_slot.map(|oldest_slot| slot_bundles.remove(&oldest_slot).unwrap())
+    }
+
     async fn run_consume_ackable_payloads_inner(
         &self,
         mut ackable_payload_rx: Receiver<AckablePayload>,
@@ -192,40 +182,27 @@ impl BundleAggregator {
         while let Some(ackable_payload) = ackable_payload_rx.next().await {
             // Because many ackable payloads may be consumed from a server side backlog and bundles
             // have a minimum time to complete, we may run out of memory when trying to consume all
-            // available payloads. We sleep when noticing the ackable payload is for a new bundle
-            // and MAX_INCOMPLETE_BUNDLES are already waiting to hit their age limit.
-            // NOTE: It is important to consume payloads for existing bundles lest we leave
-            // insufficient time for the youngest bundle to capture all payloads while we wait for
-            // the oldest to complete.
+            // available payloads. We make the relatively safe assumption that no payloads will
+            // arrive for the oldest bundle once MAX_INCOMPLETE_BUNDLES - 1 newer bundles are
+            // already being formed.
             if !self
                 .slot_bundles
                 .read()
                 .await
                 .contains_key(&ackable_payload.1.slot)
-                && self.slot_bundles.read().await.len() >= MAX_INCOMPLETE_BUNDLES
+                && self.slot_bundles.read().await.len() == MAX_INCOMPLETE_BUNDLES
             {
+                let mut tx = self.bundle_tx.clone();
+
+                let oldest_slot_bundle = self.get_oldest_bundle().await.expect("expect slot_bundles to have at least one slot bundle when at incomplete bundle limit");
+
                 warn!(
                     MAX_INCOMPLETE_BUNDLES,
-                    "hit incomplete bundles limit, sleeping for {}s",
-                    BUNDLE_LIMIT_SLEEP_DURATION.as_secs()
+                    slot = %oldest_slot_bundle.slot,
+                    "hit incomplete bundles limit, queueing oldest aggregated bundle for storage",
                 );
 
-                loop {
-                    tokio::time::sleep(BUNDLE_LIMIT_SLEEP_DURATION).await;
-
-                    if self.slot_bundles.read().await.len() < MAX_INCOMPLETE_BUNDLES {
-                        info!(
-                            "incomplete bundle count back below limit, resuming bundle aggregation"
-                        );
-                        break;
-                    }
-
-                    info!(
-                        MAX_INCOMPLETE_BUNDLES,
-                        "incomplete bundle count still above limit, sleeping for {}s",
-                        BUNDLE_LIMIT_SLEEP_DURATION.as_secs()
-                    );
-                }
+                tx.send(oldest_slot_bundle).await?;
             }
 
             self.add_execution_payload(ackable_payload).await?;

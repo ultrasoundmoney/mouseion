@@ -19,18 +19,28 @@
 //! a slot is already in the past, we respect a MIN_BUNDLE_AGE. This means on start, we may consume
 //! as many messages as we can within MIN_BUNDLE_AGE. This could easily be thousands. This message
 //! count divided by min_bundle_size is the number of bundles we may have in parallel. Considering
-//! bundles may be 300MiB in size, this is too many. To put a cap on this we stop payload
-//! consumption for bundles at MAX_INCOMPLETE_BUNDLES and let our message_consumer <->
-//! bundle_aggregator channel fill up to have it automatically back pressure and stop the
-//! message_consumer.
+//! bundles may be 300MiB in size, this is too many. To put a cap on this we make the relatively
+//! safe assumption that there will be no more messages coming for the oldest bundle if
+//! MAX_INCOMPLETE_BUNDLES - 1 newer bundles are already being formed.
 
 use std::time::Duration;
 
+use lazy_static::lazy_static;
+
+use crate::units::Slot;
+
 /// The minimum time we allow for a bundle to come together.
-pub const MIN_BUNDLE_AGE: Duration = Duration::from_secs(16);
+pub const BUNDLE_MIN_AGE: Duration = Duration::from_secs(16);
 /// The time we allow for a bundle to come together after a slot has finished.
 pub const BUNDLE_MAX_AGE_BUFFER: Duration = Duration::from_secs(8);
+lazy_static! {
+    /// Maximum age of a slot before we consider a bundle complete.
+    pub static ref BUNDLE_SLOT_MAX_AGE: chrono::Duration =
+        chrono::Duration::seconds(Slot::SECONDS_PER_SLOT.try_into().unwrap()) + chrono::Duration::from_std(BUNDLE_MAX_AGE_BUFFER).unwrap();
+}
 
 const MAX_PAYLOADS_PER_BUNDLE: i64 = 1600;
+// Should be set high enough to allow it to be highly unlikely a payload for the oldest bundle
+// arrives when having this many incomplete bundles.
 pub const MAX_INCOMPLETE_BUNDLES: usize = 8;
 pub const MAX_ACK_PENDING: i64 = 8 * MAX_PAYLOADS_PER_BUNDLE;

@@ -8,7 +8,7 @@ use crate::env::{Network, ENV_CONFIG};
 
 // Beacon chain slots are defined as 12 second periods starting from genesis. With u32 our program
 // would overflow when the slot number passes 2_147_483_647. i32::MAX * 12 seconds = ~817 years.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialOrd, PartialEq, Serialize)]
 pub struct Slot(pub i32);
 
 lazy_static! {
