@@ -278,7 +278,7 @@ impl BundleAggregator {
 
             if complete_bundles.is_empty() {
                 trace!(
-                    "no slot bundles are old enough to archive, sleeping for {}",
+                    "no slot bundles are old enough to archive, sleeping for {}s",
                     AGGREGATION_INTERVAL_DURATION.as_secs()
                 );
             } else {
