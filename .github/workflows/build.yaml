@@ -46,3 +46,5 @@ jobs:
           tags: |
              europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:${{ steps.get-tag.outputs.short_ref }}
              europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
