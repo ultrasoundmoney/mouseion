@@ -8,7 +8,8 @@ use async_nats::jetstream::{
 };
 use futures::{channel::mpsc, SinkExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace};
+use tokio::{select, sync::Notify};
+use tracing::{debug, error, info, trace};
 
 use crate::{health::MessageConsumerHealth, units::Slot};
 
@@ -57,7 +58,7 @@ impl MessageConsumer {
         }
     }
 
-    pub async fn run(&self) -> Result<()> {
+    async fn consume_messages(&self) -> Result<()> {
         debug!("connecting to NATS");
         let nats_context = jetstream::new(self.nats_client.clone());
         let stream = nats_context.get_stream(STREAM_NAME).await?;
@@ -78,7 +79,8 @@ impl MessageConsumer {
         let mut message_stream = consumer.messages().await?;
 
         while let Some(message) = message_stream.try_next().await? {
-            trace!(?message, "received message");
+            trace!(message_size_kb = message.length / 1000, "received message");
+
             let (message, acker) = message.split();
 
             // Get block_number and state_root from message payload JSON
@@ -93,10 +95,9 @@ impl MessageConsumer {
                 .as_str()
                 .ok_or_else(|| anyhow!("state_root is not a string"))?;
 
-            debug!(
-                slot = %archive_payload.slot,
-                state_root, "received new execution payload"
-            );
+            let size = payload.len();
+
+            debug!(slot = %archive_payload.slot, size, state_root, "queueing message for bundling");
 
             tx.send((acker, archive_payload)).await?;
 
@@ -105,5 +106,20 @@ impl MessageConsumer {
         }
 
         Ok(())
+    }
+
+    pub async fn run(&self, shutdown_notify: &Notify) {
+        select! {
+            result = self.consume_messages() => {
+                match result {
+                    Ok(_) => info!("message consumer stopped"),
+                    Err(e) => error!(%e, "message consumer exited with error"),
+                }
+                shutdown_notify.notify_waiters();
+            }
+            _ = shutdown_notify.notified() => {
+                info!("message consumer shutting down");
+            }
+        }
     }
 }

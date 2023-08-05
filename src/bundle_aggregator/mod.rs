@@ -3,6 +3,8 @@
 //!
 //! Interesting performance trade-off is to do csv serialization and compression work as messages
 //! are received, or to buffer them by slot and do the work all at once, concurrently.
+mod hashmap_size;
+
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::{anyhow, Result};
@@ -11,12 +13,15 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use futures::{
     channel::mpsc::{self, Receiver},
     future::try_join_all,
-    SinkExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
 };
 use lazy_static::lazy_static;
 use object_store::path::Path;
-use tokio::sync::RwLock;
-use tracing::{debug, info, trace};
+use tokio::{
+    select,
+    sync::{Notify, RwLock},
+};
+use tracing::{debug, error, info, trace};
 
 use crate::{message_consumer::AckablePayload, units::Slot};
 
@@ -115,6 +120,15 @@ impl BundleAggregator {
 
     async fn find_complete_slots(&self) -> Vec<Slot> {
         let slot_bundles = self.slot_bundles.read().await;
+
+        trace!(
+            size_mb = tracing::field::display({
+                let size = hashmap_size::size_of_hashmap(&slot_bundles);
+                size / 1_000_000
+            }),
+            "scanning for complete slots in slot_bundles map"
+        );
+
         slot_bundles
             .iter()
             .filter(|(slot, bundle)| {
@@ -148,13 +162,28 @@ impl BundleAggregator {
         let mut complete_bundles = Vec::new();
         for slot in complete_slots {
             let bundle = slot_bundles.remove(&slot).unwrap();
+
+            trace!(
+                %slot,
+                bundle_payload_count = bundle.execution_payloads.len(),
+                bundle_size_kb = tracing::field::display({
+                    let bundle_size_kb = bundle
+                        .execution_payloads
+                        .iter()
+                        .map(|payload| { serde_json::to_string(payload).unwrap().len() })
+                        .sum::<usize>() / 1000;
+                    bundle_size_kb
+                }),
+                "completed new bundle"
+            );
+
             complete_bundles.push((slot, bundle));
         }
 
         Ok(complete_bundles)
     }
 
-    pub async fn run_consume_ackable_payloads(
+    async fn run_consume_ackable_payloads_inner(
         &self,
         mut ackable_payload_rx: Receiver<AckablePayload>,
     ) -> Result<()> {
@@ -165,7 +194,28 @@ impl BundleAggregator {
         Ok(())
     }
 
-    pub async fn run_complete_bundle_check(&self) -> Result<()> {
+    pub async fn run_consume_ackable_payloads(
+        &self,
+        ackable_payload_rx: Receiver<AckablePayload>,
+        shutdown_notify: &Notify,
+    ) {
+        select! {
+            result = self.run_consume_ackable_payloads_inner(ackable_payload_rx) => {
+                match result {
+                    Ok(_) => info!("bundle aggregator stopped consuming ackable payloads"),
+                    Err(e) => {
+                        error!(%e, "bundle aggregator exited with error");
+                        shutdown_notify.notify_waiters();
+                    },
+                }
+            }
+            _ = shutdown_notify.notified() => {
+                info!("bundle aggregator shutting down");
+            }
+        }
+    }
+
+    async fn run_complete_bundle_check_inner(&self) -> Result<()> {
         debug!(
             "starting bundle aggregator, on a {:?} interval",
             AGGREGATION_INTERVAL_DURATION
@@ -191,6 +241,23 @@ impl BundleAggregator {
                     trace!(%slot, "queueing aggregated bundle for storage");
                     tx.send(bundle).await?;
                 }
+            }
+        }
+    }
+
+    pub async fn run_complete_bundle_check(&self, shutdown_notify: &Notify) {
+        select! {
+            result = self.run_complete_bundle_check_inner() => {
+                match result {
+                    Ok(_) => info!("bundle aggregator bundle checking stopped"),
+                    Err(e) => {
+                        error!(%e, "bundle aggregator exited with error");
+                        shutdown_notify.notify_waiters();
+                    },
+                }
+            }
+            _ = shutdown_notify.notified().fuse() => {
+                info!("bundle aggregator shutting down");
             }
         }
     }

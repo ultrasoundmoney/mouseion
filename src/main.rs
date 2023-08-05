@@ -17,19 +17,16 @@ mod health;
 mod message_consumer;
 mod object_stores;
 mod performance;
-mod serve;
+mod server;
 mod units;
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::{
-    channel::mpsc::{self},
-    select, FutureExt,
-};
+use futures::channel::mpsc::{self};
 use health::{MessageConsumerHealth, NatsHealth};
 use tokio::{sync::Notify, try_join};
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     bundle_aggregator::BundleAggregator, bundle_shipper::BundleShipper,
@@ -75,59 +72,24 @@ async fn main() -> Result<()> {
 
     let message_consumer_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
-        async move {
-            select! {
-                result = message_consumer.run().fuse() => {
-                    match result {
-                        Ok(_) => info!("message consumer stopped"),
-                        Err(e) => error!(%e, "message consumer exited with error"),
-                    }
-                    shutdown_notify.notify_waiters();
-                }
-                _ = shutdown_notify.notified().fuse() => {
-                    info!("message consumer shutting down");
-                }
-            }
-        }
+        async move { message_consumer.run(&shutdown_notify).await }
     });
 
     let bundle_aggregator_complete_bundle_check_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
-            select! {
-                result = bundle_aggregator.run_complete_bundle_check().fuse() => {
-                    match result {
-                        Ok(_) => info!("bundle aggregator bundle checking stopped"),
-                        Err(e) => {
-                            error!(%e, "bundle aggregator exited with error");
-                            shutdown_notify.notify_waiters();
-                        },
-                    }
-                }
-                _ = shutdown_notify.notified().fuse() => {
-                    info!("bundle aggregator shutting down");
-                }
-            }
+            bundle_aggregator
+                .run_complete_bundle_check(&shutdown_notify)
+                .await;
         }
     });
 
-    let bundle_aggregator_consume_bundles_thread = tokio::spawn({
+    let bundle_aggregator_consume_ackable_payloads_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
-            select! {
-                result = bundle_aggregator_clone.run_consume_ackable_payloads(ackable_payload_rx).fuse() => {
-                    match result {
-                        Ok(_) => info!("bundle aggregator stopped consuming ackable payloads"),
-                        Err(e) => {
-                            error!(%e, "bundle aggregator exited with error");
-                            shutdown_notify.notify_waiters();
-                        },
-                    }
-                }
-                _ = shutdown_notify.notified().fuse() => {
-                    info!("bundle aggregator shutting down");
-                }
-            }
+            bundle_aggregator_clone
+                .run_consume_ackable_payloads(ackable_payload_rx, &shutdown_notify)
+                .await;
         }
     });
 
@@ -139,39 +101,20 @@ async fn main() -> Result<()> {
     let server_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
-            let result = serve::serve(app_state, shutdown_notify.clone()).await;
-            match result {
-                Ok(_) => info!("server exited"),
-                Err(e) => {
-                    error!(%e, "server exited with error");
-                    shutdown_notify.notify_waiters();
-                }
-            }
+            server::serve(app_state, &shutdown_notify).await;
         }
     });
 
     let bundle_shipper_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
         async move {
-            select! {
-                result = bundle_shipper.run().fuse() => {
-                    match result {
-                        Ok(_) => error!("bundle shipper exited unexpectedly"),
-                        Err(e) => {
-                            error!(%e, "bundle shipper exited with error");
-                            shutdown_notify.notify_waiters();
-                        },
-                    }
-                }
-                _ = shutdown_notify.notified().fuse() => {
-                    info!("bundle shipper shutting down");
-                }
-            }
+            bundle_shipper.run(&shutdown_notify).await;
         }
     });
 
     try_join!(
         bundle_aggregator_complete_bundle_check_thread,
-        bundle_aggregator_consume_bundles_thread,
+        bundle_aggregator_consume_ackable_payloads_thread,
         bundle_shipper_thread,
         message_consumer_thread,
         server_thread,
