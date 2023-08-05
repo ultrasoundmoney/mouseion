@@ -7,11 +7,11 @@ jobs:
   docker-release:
     name: Tagged Docker release to Google Artifact Registry
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')  # <-- Notice that I'm filtering here to only run when a tagged commit is pushed
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') # <-- Notice that I'm filtering here to only run when a tagged commit is pushed
 
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
 
     steps:
       - id: checkout
@@ -44,7 +44,7 @@ jobs:
         with:
           push: true
           tags: |
-             europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:${{ steps.get-tag.outputs.short_ref }}
-             europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:latest
+            europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:${{ steps.get-tag.outputs.short_ref }}
+            europe-west1-docker.pkg.dev/ultra-sound-relay/relay/payload-archiver:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
