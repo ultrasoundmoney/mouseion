@@ -15,9 +15,9 @@ impl HealthCheck for NatsHealth {
     fn health_status(&self) -> (bool, String) {
         use async_nats::connection::State;
         match self.nats.connection_state() {
-            State::Connected => (true, "connected".to_string()),
-            State::Disconnected => (false, "disconnected".to_string()),
-            State::Pending => (false, "reconnecting".to_string()),
+            State::Connected => (true, "healthy, connected".to_string()),
+            State::Disconnected => (false, "unhealthy, disconnected".to_string()),
+            State::Pending => (false, "unhealthy, reconnecting".to_string()),
         }
     }
 }
