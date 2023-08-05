@@ -32,6 +32,8 @@ use crate::{
 type JsonValue = serde_json::Value;
 
 const AGGREGATION_INTERVAL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
+/// Duration we sleep when we've reached the incomplete bundle limit.
+const BUNDLE_LIMIT_SLEEP_DURATION: Duration = Duration::from_secs(1);
 
 lazy_static! {
     // Maximum age of a slot before we consider a bundle complete.
@@ -188,6 +190,50 @@ impl BundleAggregator {
         mut ackable_payload_rx: Receiver<AckablePayload>,
     ) -> Result<()> {
         while let Some(ackable_payload) = ackable_payload_rx.next().await {
+            // Because many ackable payloads may be consumed from a server side backlog and bundles
+            // have a minimum time to complete, we may run out of memory when trying to consume all
+            // available payloads. We sleep when noticing the ackable payload is for a new bundle
+            // and MAX_INCOMPLETE_BUNDLES are already waiting to hit their age limit.
+            // NOTE: It is important to consume payloads for existing bundles lest we leave
+            // insufficient time for the youngest bundle to capture all payloads while we wait for
+            // the oldest to complete.
+            if !self
+                .slot_bundles
+                .read()
+                .await
+                .contains_key(&ackable_payload.1.slot)
+                && self.slot_bundles.read().await.len() >= MAX_INCOMPLETE_BUNDLES
+            {
+                warn!(
+                    MAX_INCOMPLETE_BUNDLES,
+                    "hit incomplete bundles limit, sleeping for {}s",
+                    BUNDLE_LIMIT_SLEEP_DURATION.as_secs()
+                );
+
+                loop {
+                    tokio::time::sleep(BUNDLE_LIMIT_SLEEP_DURATION).await;
+
+                    if self
+                        .slot_bundles
+                        .read()
+                        .await
+                        .len()
+                        .lt(&MAX_INCOMPLETE_BUNDLES)
+                    {
+                        info!(
+                            "incomplete bundle count back below limit, resuming bundle aggregation"
+                        );
+                        break;
+                    }
+
+                    info!(
+                        MAX_INCOMPLETE_BUNDLES,
+                        "incomplete bundle count still above limit, sleeping for {}s",
+                        BUNDLE_LIMIT_SLEEP_DURATION.as_secs()
+                    );
+                }
+            }
+
             self.add_execution_payload(ackable_payload).await?;
         }
 
@@ -231,7 +277,10 @@ impl BundleAggregator {
             let complete_bundles = self.get_complete_bundles().await?;
 
             if complete_bundles.is_empty() {
-                trace!("no slot bundles are old enough to archive, sleeping..");
+                trace!(
+                    "no slot bundles are old enough to archive, sleeping for {}",
+                    AGGREGATION_INTERVAL_DURATION.as_secs()
+                );
             } else {
                 info!(
                     count = complete_bundles.len(),
