@@ -213,13 +213,7 @@ impl BundleAggregator {
                 loop {
                     tokio::time::sleep(BUNDLE_LIMIT_SLEEP_DURATION).await;
 
-                    if self
-                        .slot_bundles
-                        .read()
-                        .await
-                        .len()
-                        .lt(&MAX_INCOMPLETE_BUNDLES)
-                    {
+                    if self.slot_bundles.read().await.len() < MAX_INCOMPLETE_BUNDLES {
                         info!(
                             "incomplete bundle count back below limit, resuming bundle aggregation"
                         );
