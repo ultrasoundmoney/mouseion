@@ -12,8 +12,8 @@ pub async fn report_memory_periodically() -> JoinHandle<()> {
 
         if let Some(usage) = memory_stats() {
             trace!(
-                "current physical memory usage: {}",
-                usage.physical_mem / 1_000_000,
+                mem_mb = usage.physical_mem / 1_000_000,
+                "current physical memory usage",
             );
         } else {
             println!("couldn't get the current memory usage");
