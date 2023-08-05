@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{select, sync::Notify};
 use tracing::{debug, error, info, trace};
 
-use crate::{health::MessageConsumerHealth, units::Slot};
+use crate::{health::MessageConsumerHealth, operation_constants::MAX_ACK_PENDING, units::Slot};
 
 type JsonValue = serde_json::Value;
 
@@ -68,7 +68,7 @@ impl MessageConsumer {
                 CONSUMER_NAME,
                 pull::Config {
                     durable_name: Some(CONSUMER_NAME.to_string()),
-                    max_ack_pending: 4800,
+                    max_ack_pending: MAX_ACK_PENDING,
                     ..Default::default()
                 },
             )

@@ -21,17 +21,17 @@ use tokio::{
     select,
     sync::{Notify, RwLock},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
-use crate::{message_consumer::AckablePayload, units::Slot};
+use crate::{
+    message_consumer::AckablePayload,
+    operation_constants::{BUNDLE_MAX_AGE_BUFFER, MAX_INCOMPLETE_BUNDLES, MIN_BUNDLE_AGE},
+    units::Slot,
+};
 
 type JsonValue = serde_json::Value;
 
 const AGGREGATION_INTERVAL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
-// The minimum time we allow for a bundle to come together.
-const MIN_BUNDLE_AGE: Duration = Duration::from_secs(16);
-// The time we allow for a bundle to come together after a slot has finished.
-const BUNDLE_MAX_AGE_BUFFER: Duration = Duration::from_secs(8);
 
 lazy_static! {
     // Maximum age of a slot before we consider a bundle complete.
