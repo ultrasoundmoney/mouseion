@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
         MessageConsumer::new(message_health.clone(), nats_client, ackable_payload_tx).await;
 
     // Bundle queue
-    let (bundle_tx, bundle_rx) = mpsc::channel(16);
+    let (bundle_tx, bundle_rx) = mpsc::channel(8);
     let bundle_aggregator = Arc::new(BundleAggregator::new(bundle_tx));
     let bundle_aggregator_clone = bundle_aggregator.clone();
 
