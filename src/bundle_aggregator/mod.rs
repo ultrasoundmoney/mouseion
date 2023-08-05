@@ -188,7 +188,7 @@ impl BundleAggregator {
                     "bundles are old enough with slots far enough in the past to archive",
                 );
                 for (slot, bundle) in complete_bundles {
-                    trace!(%slot, "sending aggregated bundle");
+                    trace!(%slot, "queueing aggregated bundle for storage");
                     tx.send(bundle).await?;
                 }
             }
