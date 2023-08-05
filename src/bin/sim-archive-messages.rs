@@ -2,6 +2,26 @@ use anyhow::{Context, Result};
 use async_nats::jetstream;
 use tracing::{debug, info};
 
+async fn send_messages(
+    messages: &[serde_json::Value],
+    nats_context: &jetstream::Context,
+) -> Result<()> {
+    for payload in messages {
+        debug!(
+            "publishing payload for slot: {:?}",
+            payload.get("slot").unwrap().as_u64().unwrap()
+        );
+        nats_context
+            .publish(
+                "payload-archive".to_string(),
+                serde_json::to_vec(&payload).unwrap().into(),
+            )
+            .await?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -18,18 +38,14 @@ async fn main() -> Result<()> {
     let messages: Vec<serde_json::Value> = serde_json::from_reader(messages_file)?;
     let messages_len = messages.len();
 
-    for payload in messages {
-        debug!(
-            "publishing payload for slot: {:?}",
-            payload.get("slot").unwrap().as_u64().unwrap()
-        );
-        nats_context
-            .publish(
-                "payload-archive".to_string(),
-                serde_json::to_vec(&payload).unwrap().into(),
-            )
-            .await?;
-    }
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
+    send_messages(&messages, &nats_context).await?;
 
     info!("done publishing {} dummy messages", messages_len);
 
