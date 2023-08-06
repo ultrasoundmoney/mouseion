@@ -96,9 +96,7 @@ impl MessageConsumer {
                 .as_str()
                 .ok_or_else(|| anyhow!("state_root is not a string"))?;
 
-            let size = payload.len();
-
-            debug!(slot = %archive_payload.slot, size, state_root, "queueing message for bundling");
+            debug!(slot = %archive_payload.slot, size_kb = payload.len() / 1000, state_root, "queueing message for bundling");
 
             tx.send((acker, archive_payload)).await?;
 
