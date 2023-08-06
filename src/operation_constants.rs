@@ -29,8 +29,10 @@ use lazy_static::lazy_static;
 
 use crate::units::Slot;
 
-/// The minimum time we allow for a bundle to come together.
-pub const BUNDLE_MIN_AGE: Duration = Duration::from_secs(16);
+/// The minimum time we allow for a bundle to come together. Considering some bundles are several GiB in
+/// size. We need a while to collect all payloads. Shipping the oldest when at the
+/// MAX_INCOMPLETE_BUNDLES limit will keep things moving.
+pub const BUNDLE_MIN_AGE: Duration = Duration::from_secs(32);
 /// The time we allow for a bundle to come together after a slot has finished.
 pub const BUNDLE_MAX_AGE_BUFFER: Duration = Duration::from_secs(8);
 lazy_static! {
