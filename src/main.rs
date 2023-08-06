@@ -35,6 +35,14 @@ use crate::{
     message_consumer::MessageConsumer,
 };
 
+// Maximum number of bundles that can be waiting for shipping. Set to limit memory usage and provide
+// backpressure.
+const MAX_BUNDLE_QUEUE_SIZE: usize = 4;
+
+// Maximum number of ackable payloads that can be waiting for aggregation. Set to limit memory
+// usage and provide backpressure.
+const MAX_ACKABLE_PAYLOAD_QUEUE_SIZE: usize = 1024;
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     message_health: Arc<MessageConsumerHealth>,
@@ -71,12 +79,12 @@ async fn main() -> Result<()> {
     let message_health = Arc::new(MessageConsumerHealth::new());
 
     // Ackable payload queue
-    let (ackable_payload_tx, ackable_payload_rx) = mpsc::channel(512);
+    let (ackable_payload_tx, ackable_payload_rx) = mpsc::channel(MAX_ACKABLE_PAYLOAD_QUEUE_SIZE);
     let message_consumer =
         MessageConsumer::new(message_health.clone(), nats_client, ackable_payload_tx).await;
 
     // Bundle queue
-    let (bundle_tx, bundle_rx) = mpsc::channel(8);
+    let (bundle_tx, bundle_rx) = mpsc::channel(MAX_BUNDLE_QUEUE_SIZE);
     let bundle_aggregator = Arc::new(BundleAggregator::new(bundle_tx));
     let bundle_aggregator_clone = bundle_aggregator.clone();
 

@@ -42,5 +42,5 @@ lazy_static! {
 const MAX_PAYLOADS_PER_BUNDLE: i64 = 1600;
 // Should be set high enough to allow it to be highly unlikely a payload for the oldest bundle
 // arrives when having this many incomplete bundles.
-pub const MAX_INCOMPLETE_BUNDLES: usize = 8;
-pub const MAX_ACK_PENDING: i64 = 8 * MAX_PAYLOADS_PER_BUNDLE;
+pub const MAX_INCOMPLETE_BUNDLES: usize = 4;
+pub const MAX_ACK_PENDING: i64 = MAX_INCOMPLETE_BUNDLES as i64 * MAX_PAYLOADS_PER_BUNDLE;
