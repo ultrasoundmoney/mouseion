@@ -12,7 +12,6 @@
 //!   storage.
 mod bundle_aggregator;
 mod bundle_shipper;
-mod env;
 mod health;
 mod message_consumer;
 mod object_stores;
@@ -20,13 +19,13 @@ mod operation_constants;
 mod performance;
 mod server;
 mod trace_memory;
-mod units;
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::channel::mpsc::{self};
 use health::{MessageConsumerHealth, NatsHealth};
+use payload_archiver::env;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, Level};
 

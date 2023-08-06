@@ -7,13 +7,12 @@ use async_nats::jetstream::{
     message::Acker,
 };
 use futures::{channel::mpsc, SinkExt, TryStreamExt};
+use payload_archiver::ArchivePayload;
 use serde::{Deserialize, Serialize};
 use tokio::{select, sync::Notify};
 use tracing::{debug, error, info, trace};
 
-use crate::{health::MessageConsumerHealth, operation_constants::MAX_ACK_PENDING, units::Slot};
-
-type JsonValue = serde_json::Value;
+use crate::{health::MessageConsumerHealth, operation_constants::MAX_ACK_PENDING};
 
 pub const STREAM_NAME: &str = "payload-archive";
 const CONSUMER_NAME: &str = "payload-archive-consumer";
@@ -24,17 +23,6 @@ struct Withdrawal {
     amount: String,
     index: String,
     validator_index: String,
-}
-
-// Archive messages carry a slot number, and a execution payload. The slot number is used to make
-// storage simple. Bundle messages with the same slot number together. The execution payload is
-// what we receive from builders. This also means we do not handle re-orgs, but store all data.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ArchivePayload {
-    // To avoid unneccesary work we do not deserialize the payload.
-    /// This is the execution payload we'd like to store.
-    pub payload: JsonValue,
-    pub slot: Slot,
 }
 
 pub type AckablePayload = (Acker, ArchivePayload);

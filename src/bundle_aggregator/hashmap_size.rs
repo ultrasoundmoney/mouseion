@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::units::Slot;
+use payload_archiver::units::Slot;
 
 use super::SlotBundle;
 

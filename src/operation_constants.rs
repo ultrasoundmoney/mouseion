@@ -26,8 +26,7 @@
 use std::time::Duration;
 
 use lazy_static::lazy_static;
-
-use crate::units::Slot;
+use payload_archiver::units::Slot;
 
 /// The minimum time we allow for a bundle to come together. Considering some bundles are several GiB in
 /// size. We need a while to collect all payloads. Shipping the oldest when at the

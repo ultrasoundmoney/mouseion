@@ -16,6 +16,7 @@ use futures::{
     FutureExt, SinkExt, StreamExt,
 };
 use object_store::path::Path;
+use payload_archiver::units::Slot;
 use tokio::{
     select,
     sync::{Notify, RwLock},
@@ -25,7 +26,6 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     message_consumer::AckablePayload,
     operation_constants::{BUNDLE_MIN_AGE, BUNDLE_SLOT_MAX_AGE, MAX_INCOMPLETE_BUNDLES},
-    units::Slot,
 };
 
 type JsonValue = serde_json::Value;
