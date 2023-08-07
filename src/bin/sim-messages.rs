@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 
         let ndjson = read_file(decompressed_path)?;
         let payloads = ndjson
-            .split("\n")
+            .split('\n')
             .filter(|s| !s.trim().is_empty()) // filter out empty strings
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
