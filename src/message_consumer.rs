@@ -71,8 +71,6 @@ impl MessageConsumer {
         let mut message_stream = consumer.messages().await?;
 
         while let Some(message) = message_stream.try_next().await? {
-            trace!(message_size_kb = message.length / 1000, "received message");
-
             let (message, acker) = message.split();
 
             // Get block_number and state_root from message payload JSON
@@ -87,7 +85,7 @@ impl MessageConsumer {
                 .as_str()
                 .ok_or_else(|| anyhow!("state_root is not a string"))?;
 
-            debug!(slot = %archive_payload.slot, size_kb = payload.len() / 1000, state_root, "queueing message for bundling");
+            trace!(slot = %archive_payload.slot, size_kb = payload.len() / 1000, state_root, "queueing message for bundling");
 
             tx.send((acker, archive_payload)).await?;
 

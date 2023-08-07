@@ -53,7 +53,7 @@ impl<OS: ObjectStore> BundleShipper<OS> {
                     .put(&path, bytes_ndjson_gz.into())
                     .timed("put-to-object-store")
                     .await?;
-                debug!(slot = %complete_bundle_arc_clone.slot, "stored bundle");
+                info!(slot = %complete_bundle_arc_clone.slot, "stored bundle");
 
                 // Bundle has been successfully stored, ack the messages.
                 complete_bundle_arc_clone
