@@ -225,7 +225,7 @@ impl BundleAggregator {
                 }
             }
             _ = shutdown_notify.notified() => {
-                info!("bundle aggregator shutting down");
+                info!("bundle aggregator ackable payload consumption shutting down");
             }
         }
     }
@@ -275,7 +275,7 @@ impl BundleAggregator {
                 }
             }
             _ = shutdown_notify.notified().fuse() => {
-                info!("bundle aggregator shutting down");
+                info!("bundle aggregator complete bundle checking shutting down");
             }
         }
     }
