@@ -18,7 +18,6 @@ mod object_stores;
 mod operation_constants;
 mod performance;
 mod server;
-mod trace_memory;
 
 use std::sync::Arc;
 
@@ -27,7 +26,7 @@ use futures::channel::mpsc::{self};
 use health::{MessageConsumerHealth, NatsHealth};
 use payload_archiver::env;
 use tokio::{sync::Notify, try_join};
-use tracing::{info, Level};
+use tracing::info;
 
 use crate::{
     bundle_aggregator::BundleAggregator, bundle_shipper::BundleShipper,
@@ -55,17 +54,6 @@ async fn main() -> Result<()> {
     info!("starting payload archiver");
 
     let shutdown_notify = Arc::new(Notify::new());
-
-    if tracing::enabled!(Level::TRACE) {
-        let handle = tokio::spawn(async move {
-            trace_memory::report_memory_periodically().await;
-        });
-        let shutdown_notify = shutdown_notify.clone();
-        tokio::spawn(async move {
-            shutdown_notify.notified().await;
-            handle.abort();
-        });
-    }
 
     let env_config = &env::ENV_CONFIG;
 
