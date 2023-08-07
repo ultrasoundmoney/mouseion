@@ -927,6 +927,7 @@ dependencies = [
  "flate2",
  "futures",
  "lazy_static",
+ "memory-stats",
  "object_store",
  "pin-project",
  "serde",
