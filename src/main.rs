@@ -36,11 +36,11 @@ use crate::{
 
 // Maximum number of bundles that can be waiting for shipping. Set to limit memory usage and provide
 // backpressure.
-const MAX_BUNDLE_QUEUE_SIZE: usize = 4;
+const MAX_BUNDLE_QUEUE_SIZE: usize = 2;
 
 // Maximum number of ackable payloads that can be waiting for aggregation. Set to limit memory
 // usage and provide backpressure.
-const MAX_ACKABLE_PAYLOAD_QUEUE_SIZE: usize = 1024;
+const MAX_ACKABLE_PAYLOAD_QUEUE_SIZE: usize = 512;
 
 #[derive(Debug, Clone)]
 pub struct AppState {

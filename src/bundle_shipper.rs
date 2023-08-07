@@ -8,7 +8,7 @@ use tracing::{debug, error, info};
 
 use crate::{bundle_aggregator::CompleteBundle, performance::TimedExt};
 
-const COMPRESS_BUNDLE_CONCURRENCY_LIMIT: usize = 3;
+const COMPRESS_BUNDLE_CONCURRENCY_LIMIT: usize = 2;
 
 pub struct BundleShipper<OS: ObjectStore> {
     bundle_rx: mpsc::Receiver<CompleteBundle>,
