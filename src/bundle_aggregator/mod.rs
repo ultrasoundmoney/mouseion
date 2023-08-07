@@ -5,21 +5,22 @@
 //! are received, or to buffer them by slot and do the work all at once, concurrently.
 mod hashmap_size;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::message::Acker;
 use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use flate2::{write::GzEncoder, Compression};
 use futures::{
     channel::mpsc::{self, Receiver},
     future::try_join_all,
     FutureExt, SinkExt, StreamExt,
 };
 use object_store::path::Path;
-use payload_archiver::{units::Slot, JsonValue};
+use payload_archiver::units::Slot;
 use tokio::{
     select,
-    sync::{Notify, RwLock},
+    sync::{Mutex, Notify, RwLock},
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -37,11 +38,17 @@ pub struct SlotBundle {
     ackers: Vec<Acker>,
     // Earliest is when we first saw an execution payload for the slot these payloads are for.
     earliest: DateTime<Utc>,
-    execution_payloads: Vec<JsonValue>,
+    execution_payloads_ndjson: String,
     pub slot: Slot,
 }
 
-impl SlotBundle {
+pub struct CompleteBundle {
+    pub slot: Slot,
+    pub ackers: Vec<Acker>,
+    pub execution_payloads_ndjson: String,
+}
+
+impl CompleteBundle {
     pub fn path(&self) -> Path {
         let slot = self.slot;
         let slot_date_time = slot.date_time();
@@ -56,34 +63,54 @@ impl SlotBundle {
         Path::from(path_string)
     }
 
-    pub fn to_ndjson(&self) -> Result<String> {
-        let mut ndjson = String::new();
-        for execution_payload in self.execution_payloads.iter() {
-            ndjson.push_str(&serde_json::to_string(execution_payload)?);
-            ndjson.push('\n');
-        }
-        Ok(ndjson)
-    }
-
-    pub async fn ack(&self) -> Result<()> {
+    pub async fn ack_all(&self) -> Result<()> {
         try_join_all(self.ackers.iter().map(|acker| acker.ack()))
             .await
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
     }
+
+    pub async fn compress_ndjson(self: Arc<Self>) -> Result<Vec<u8>> {
+        let self_clone = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(self_clone.execution_payloads_ndjson.as_bytes())?;
+            let bytes = encoder.finish()?;
+            Ok(bytes)
+        })
+        .await?
+    }
+}
+
+impl From<SlotBundle> for CompleteBundle {
+    fn from(slot_bundle: SlotBundle) -> Self {
+        Self {
+            slot: slot_bundle.slot,
+            ackers: slot_bundle.ackers,
+            execution_payloads_ndjson: slot_bundle.execution_payloads_ndjson,
+        }
+    }
 }
 
 pub struct BundleAggregator {
     slot_bundles: RwLock<HashMap<Slot, SlotBundle>>,
-    bundle_tx: mpsc::Sender<SlotBundle>,
+    bundle_tx: mpsc::Sender<CompleteBundle>,
+    ackable_payload_rx: Mutex<Receiver<AckablePayload>>,
+    shutdown_notify: Arc<Notify>,
 }
 
 impl BundleAggregator {
-    pub fn new(bundle_tx: mpsc::Sender<SlotBundle>) -> Self {
+    pub fn new(
+        ackable_payload_rx: mpsc::Receiver<AckablePayload>,
+        bundle_tx: mpsc::Sender<CompleteBundle>,
+        shutdown_notify: Arc<Notify>,
+    ) -> Self {
         Self {
-            slot_bundles: RwLock::new(HashMap::new()),
+            ackable_payload_rx: Mutex::new(ackable_payload_rx),
             bundle_tx,
+            shutdown_notify,
+            slot_bundles: RwLock::new(HashMap::new()),
         }
     }
 
@@ -95,12 +122,16 @@ impl BundleAggregator {
             .or_insert_with(|| SlotBundle {
                 ackers: Vec::new(),
                 earliest: Utc::now(),
-                execution_payloads: Vec::new(),
+                execution_payloads_ndjson: String::new(),
                 slot: archive_payload.slot,
             });
 
         slot_bundle.ackers.push(acker);
-        slot_bundle.execution_payloads.push(archive_payload.payload);
+
+        slot_bundle
+            .execution_payloads_ndjson
+            .push_str(&archive_payload.payload.to_string());
+        slot_bundle.execution_payloads_ndjson.push('\n');
 
         Ok(())
     }
@@ -149,15 +180,8 @@ impl BundleAggregator {
 
             trace!(
                 %slot,
-                bundle_payload_count = bundle.execution_payloads.len(),
-                bundle_size_kb = tracing::field::display({
-                    let bundle_size_kb = bundle
-                        .execution_payloads
-                        .iter()
-                        .map(|payload| { serde_json::to_string(payload).unwrap().len() })
-                        .sum::<usize>() / 1000;
-                    bundle_size_kb
-                }),
+                bundle_payload_count = bundle.execution_payloads_ndjson.len(),
+                bundle_size_kb = bundle.execution_payloads_ndjson.len() / 1000,
                 "completed new bundle"
             );
 
@@ -173,10 +197,8 @@ impl BundleAggregator {
         oldest_slot.map(|oldest_slot| slot_bundles.remove(&oldest_slot).unwrap())
     }
 
-    async fn run_consume_ackable_payloads_inner(
-        &self,
-        mut ackable_payload_rx: Receiver<AckablePayload>,
-    ) -> Result<()> {
+    async fn run_consume_ackable_payloads_inner(&self) -> Result<()> {
+        let mut ackable_payload_rx = self.ackable_payload_rx.lock().await;
         while let Some(ackable_payload) = ackable_payload_rx.next().await {
             // Because many ackable payloads may be consumed from a server side backlog and bundles
             // have a minimum time to complete, we may run out of memory when trying to consume all
@@ -200,7 +222,7 @@ impl BundleAggregator {
                     "hit incomplete bundles limit, queueing oldest aggregated bundle for storage",
                 );
 
-                tx.send(oldest_slot_bundle).await?;
+                tx.send(oldest_slot_bundle.into()).await?;
             }
 
             self.add_execution_payload(ackable_payload).await?;
@@ -209,22 +231,18 @@ impl BundleAggregator {
         Ok(())
     }
 
-    pub async fn run_consume_ackable_payloads(
-        &self,
-        ackable_payload_rx: Receiver<AckablePayload>,
-        shutdown_notify: &Notify,
-    ) {
+    pub async fn run_consume_ackable_payloads(&self) {
         select! {
-            result = self.run_consume_ackable_payloads_inner(ackable_payload_rx) => {
+            result = self.run_consume_ackable_payloads_inner() => {
                 match result {
                     Ok(_) => info!("bundle aggregator stopped consuming ackable payloads"),
                     Err(e) => {
                         error!(%e, "bundle aggregator exited with error");
-                        shutdown_notify.notify_waiters();
+                        self.shutdown_notify.notify_waiters();
                     },
                 }
             }
-            _ = shutdown_notify.notified() => {
+            _ = self.shutdown_notify.notified() => {
                 info!("bundle aggregator ackable payload consumption shutting down");
             }
         }
@@ -257,48 +275,26 @@ impl BundleAggregator {
                 );
                 for (slot, bundle) in complete_bundles {
                     trace!(%slot, "queueing aggregated bundle for storage");
-                    tx.send(bundle).await?;
+                    tx.send(bundle.into()).await?;
                 }
             }
         }
     }
 
-    pub async fn run_complete_bundle_check(&self, shutdown_notify: &Notify) {
+    pub async fn run_complete_bundle_check(&self) {
         select! {
             result = self.run_complete_bundle_check_inner() => {
                 match result {
                     Ok(_) => info!("bundle aggregator bundle checking stopped"),
                     Err(e) => {
                         error!(%e, "bundle aggregator exited with error");
-                        shutdown_notify.notify_waiters();
+                        self.shutdown_notify.notify_waiters();
                     },
                 }
             }
-            _ = shutdown_notify.notified().fuse() => {
+            _ = self.shutdown_notify.notified().fuse() => {
                 info!("bundle aggregator complete bundle checking shutting down");
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_to_ndjson() -> Result<()> {
-        let slot_bundle = SlotBundle {
-            ackers: vec![],
-            earliest: Utc::now(),
-            execution_payloads: vec![
-                serde_json::json!({"foo": "bar"}),
-                serde_json::json!({"baz": "qux"}),
-            ],
-            slot: Slot(10),
-        };
-        let ndjson = slot_bundle.to_ndjson()?;
-        assert_eq!(ndjson, "{\"foo\":\"bar\"}\n{\"baz\":\"qux\"}\n");
-
-        Ok(())
     }
 }

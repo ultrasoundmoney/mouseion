@@ -31,6 +31,7 @@ pub struct MessageConsumer {
     message_health: Arc<MessageConsumerHealth>,
     nats_client: async_nats::Client,
     archive_payload_tx: mpsc::Sender<AckablePayload>,
+    shutdown_notify: Arc<Notify>,
 }
 
 impl MessageConsumer {
@@ -38,11 +39,13 @@ impl MessageConsumer {
         message_health: Arc<MessageConsumerHealth>,
         nats_client: async_nats::Client,
         archive_payload_tx: mpsc::Sender<AckablePayload>,
+        shutdown_notify: Arc<Notify>,
     ) -> Self {
         Self {
             message_health,
             nats_client,
             archive_payload_tx,
+            shutdown_notify,
         }
     }
 
@@ -95,16 +98,16 @@ impl MessageConsumer {
         Ok(())
     }
 
-    pub async fn run(&self, shutdown_notify: &Notify) {
+    pub async fn run(&self) {
         select! {
             result = self.consume_messages() => {
                 match result {
                     Ok(_) => info!("message consumer stopped"),
                     Err(e) => error!(%e, "message consumer exited with error"),
                 }
-                shutdown_notify.notify_waiters();
+                self.shutdown_notify.notify_waiters();
             }
-            _ = shutdown_notify.notified() => {
+            _ = self.shutdown_notify.notified() => {
                 info!("message consumer shutting down");
             }
         }

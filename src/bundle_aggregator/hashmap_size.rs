@@ -50,9 +50,7 @@ impl HasSize for SlotBundle {
         // Not accurate, DateTime has more data, but enough for an approximation, this field
         // doesn't contribute much to the size of the bundle.
             + self.earliest.timestamp().size_in_bytes()
-            + self.execution_payloads.iter().fold(0, |acc, payload| {
-                acc + serde_json::to_vec(payload).unwrap().size_in_bytes()
-            })
+            + self.execution_payloads_ndjson.len()
     }
 }
 
@@ -60,7 +58,6 @@ impl HasSize for SlotBundle {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use serde_json::json;
 
     #[test]
     fn test_size_of_hashmap() {
@@ -99,12 +96,12 @@ mod tests {
         let slot_bundle = SlotBundle {
             ackers: vec![],
             earliest: Utc.timestamp_opt(0, 0).unwrap(),
-            execution_payloads: vec![json!({"foo": "bar"})],
+            execution_payloads_ndjson: "{\"foo\": \"bar\"}".to_string(),
             slot: Slot(1),
         };
 
         // The size of slot is 4 bytes, the timestamp is 8 bytes, and the payload is 13 bytes.
-        // So, the total size should be 4 + 8 + 13 = 25
-        assert_eq!(slot_bundle.size_in_bytes(), 25);
+        // So, the total size should be 4 + 8 + 14 = 25
+        assert_eq!(slot_bundle.size_in_bytes(), 26);
     }
 }

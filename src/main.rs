@@ -79,38 +79,34 @@ async fn main() -> Result<()> {
 
     // Ackable payload queue
     let (ackable_payload_tx, ackable_payload_rx) = mpsc::channel(MAX_ACKABLE_PAYLOAD_QUEUE_SIZE);
-    let message_consumer =
-        MessageConsumer::new(message_health.clone(), nats_client, ackable_payload_tx).await;
+    let message_consumer = MessageConsumer::new(
+        message_health.clone(),
+        nats_client,
+        ackable_payload_tx,
+        shutdown_notify.clone(),
+    )
+    .await;
 
     // Bundle queue
     let (bundle_tx, bundle_rx) = mpsc::channel(MAX_BUNDLE_QUEUE_SIZE);
-    let bundle_aggregator = Arc::new(BundleAggregator::new(bundle_tx));
+    let bundle_aggregator = Arc::new(BundleAggregator::new(
+        ackable_payload_rx,
+        bundle_tx,
+        shutdown_notify.clone(),
+    ));
     let bundle_aggregator_clone = bundle_aggregator.clone();
 
     let object_store = object_stores::build_env_based_store(env_config)?;
-    let mut bundle_shipper = BundleShipper::new(bundle_rx, object_store);
+    let bundle_shipper = BundleShipper::new(bundle_rx, object_store);
 
-    let message_consumer_thread = tokio::spawn({
-        let shutdown_notify = shutdown_notify.clone();
-        async move { message_consumer.run(&shutdown_notify).await }
+    let message_consumer_thread = tokio::spawn(async move { message_consumer.run().await });
+
+    let bundle_aggregator_complete_bundle_check_thread = tokio::spawn(async move {
+        bundle_aggregator.run_complete_bundle_check().await;
     });
 
-    let bundle_aggregator_complete_bundle_check_thread = tokio::spawn({
-        let shutdown_notify = shutdown_notify.clone();
-        async move {
-            bundle_aggregator
-                .run_complete_bundle_check(&shutdown_notify)
-                .await;
-        }
-    });
-
-    let bundle_aggregator_consume_ackable_payloads_thread = tokio::spawn({
-        let shutdown_notify = shutdown_notify.clone();
-        async move {
-            bundle_aggregator_clone
-                .run_consume_ackable_payloads(ackable_payload_rx, &shutdown_notify)
-                .await;
-        }
+    let bundle_aggregator_consume_ackable_payloads_thread = tokio::spawn(async move {
+        bundle_aggregator_clone.run_consume_ackable_payloads().await;
     });
 
     let app_state = AppState {
