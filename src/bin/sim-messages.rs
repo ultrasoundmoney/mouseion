@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
                 )
                 .await?;
         }
-        info!("published {} messages", messages_len);
+        info!(slot, "published {} messages", messages_len);
     }
 
     info!("done publishing simulation messages");
