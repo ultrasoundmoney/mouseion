@@ -4,7 +4,7 @@ pub mod units;
 use serde::{Deserialize, Serialize};
 use units::Slot;
 
-type JsonValue = serde_json::Value;
+pub type JsonValue = serde_json::Value;
 
 // Archive messages carry a slot number, and a execution payload. The slot number is used to make
 // storage simple. Bundle messages with the same slot number together. The execution payload is

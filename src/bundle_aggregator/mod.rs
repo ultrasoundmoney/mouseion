@@ -16,7 +16,7 @@ use futures::{
     FutureExt, SinkExt, StreamExt,
 };
 use object_store::path::Path;
-use payload_archiver::units::Slot;
+use payload_archiver::{units::Slot, JsonValue};
 use tokio::{
     select,
     sync::{Notify, RwLock},
@@ -27,8 +27,6 @@ use crate::{
     message_consumer::AckablePayload,
     operation_constants::{BUNDLE_MIN_AGE, BUNDLE_SLOT_MAX_AGE, MAX_INCOMPLETE_BUNDLES},
 };
-
-type JsonValue = serde_json::Value;
 
 const AGGREGATION_INTERVAL_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
 
