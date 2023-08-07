@@ -9,14 +9,14 @@ async-nats = "0.31"
 async-trait = "0.1"
 axum = "0.6"
 bytes = "1"
-chrono = { version = "0.4", features = [] }
+chrono = { version = "0.4", default-features = false }
 flate2 = "1"
 futures = "0.3"
 lazy_static = "1"
 object_store = { version = "0.6", features = ["aws"] }
-pin-project = "1.1.2"
+pin-project = "1"
 serde = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
