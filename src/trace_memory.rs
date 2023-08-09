@@ -1,10 +1,9 @@
 use std::time::Duration;
 
 use memory_stats::memory_stats;
-use tokio::task::JoinHandle;
 use tracing::trace;
 
-pub async fn report_memory_periodically() -> JoinHandle<()> {
+pub async fn report_memory_periodically() {
     let mut interval = tokio::time::interval(Duration::from_secs(3));
 
     loop {
