@@ -10,10 +10,12 @@ async-trait = "0.1"
 axum = "0.6"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
+ctrlc = "3.4.0"
 flate2 = "1"
 futures = "0.3"
 lazy_static = "1"
 memory-stats = "1.1.0"
+nanoid = "0.4.0"
 object_store = { version = "0.6", features = ["aws"] }
 pin-project = "1"
 serde = "1"

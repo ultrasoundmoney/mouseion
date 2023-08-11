@@ -40,7 +40,7 @@ lazy_static! {
         chrono::Duration::seconds(Slot::SECONDS_PER_SLOT.try_into().unwrap()) + chrono::Duration::from_std(BUNDLE_MAX_AGE_BUFFER).unwrap();
 }
 
-const MAX_PAYLOADS_PER_BUNDLE: i64 = 2100;
+pub const MAX_PAYLOADS_PER_BUNDLE: i64 = 2100;
 // Should be set high enough to allow it to be highly unlikely a payload for the oldest bundle
 // arrives when having this many incomplete bundles.
 pub const MAX_INCOMPLETE_BUNDLES: usize = 4;

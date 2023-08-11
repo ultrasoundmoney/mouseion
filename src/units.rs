@@ -1,4 +1,8 @@
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
@@ -9,7 +13,7 @@ use crate::env::{Network, ENV_CONFIG};
 // Beacon chain slots are defined as 12 second periods starting from genesis. With u32 our program
 // would overflow when the slot number passes 2_147_483_647. i32::MAX * 12 seconds = ~817 years.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialOrd, PartialEq, Serialize)]
-pub struct Slot(pub i32);
+pub struct Slot(pub u32);
 
 lazy_static! {
     static ref GENESIS_TIMESTAMP: DateTime<Utc> = {
@@ -35,6 +39,14 @@ impl From<&Slot> for DateTime<Utc> {
     fn from(slot: &Slot) -> Self {
         let seconds = slot.0 as i64 * Slot::SECONDS_PER_SLOT as i64;
         *GENESIS_TIMESTAMP + chrono::Duration::seconds(seconds)
+    }
+}
+
+impl FromStr for Slot {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(Self)
     }
 }
 
