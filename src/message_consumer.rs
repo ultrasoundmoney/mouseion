@@ -60,7 +60,6 @@ impl MessageConsumer {
                 pull::Config {
                     durable_name: Some(CONSUMER_NAME.to_string()),
                     max_ack_pending: MAX_ACK_PENDING,
-                    ack_wait: std::time::Duration::from_secs(60),
                     ..Default::default()
                 },
             )

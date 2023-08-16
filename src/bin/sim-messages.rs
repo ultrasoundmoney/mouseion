@@ -6,6 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use async_nats::jetstream;
 use flate2::read::GzDecoder;
+use payload_archiver::{units::Slot, ArchivePayload};
 use tracing::{debug, info};
 
 fn decompress_gz_to_file(input_path: &str, output_path: &str) -> Result<(), std::io::Error> {
@@ -69,8 +70,15 @@ async fn main() -> Result<()> {
         let messages_len = payloads.len();
 
         for payload in payloads.into_iter() {
+            let archive_payload = ArchivePayload {
+                slot: Slot(*slot),
+                payload: serde_json::from_str(&payload).unwrap(),
+            };
             nats_context
-                .publish(format!("slot.{}", slot), payload.into())
+                .publish(
+                    "payload-archive".to_string(),
+                    serde_json::to_string(&archive_payload).unwrap().into(),
+                )
                 .await?;
         }
         info!(slot, "published {} messages", messages_len);
