@@ -103,8 +103,9 @@ pub fn get_network() -> Network {
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
     pub env: Env,
-    pub network: Network,
     pub log_perf: bool,
+    pub network: Network,
+    pub redis_uri: String,
     pub s3_secret_access_key: String,
     pub use_local_store: bool,
 }
@@ -112,8 +113,9 @@ pub struct EnvConfig {
 fn get_env_config() -> EnvConfig {
     EnvConfig {
         env: get_env(),
-        network: get_network(),
         log_perf: get_env_bool("LOG_PERF"),
+        network: get_network(),
+        redis_uri: get_env_var_unsafe("REDIS_URI"),
         s3_secret_access_key: get_env_var_unsafe("S3_SECRET_ACCESS_KEY"),
         use_local_store: get_env_bool("USE_LOCAL_STORE"),
     }

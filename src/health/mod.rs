@@ -1,8 +1,8 @@
 mod message_consumer;
-mod nats;
+mod redis;
 
 pub use message_consumer::MessageConsumerHealth;
-pub use nats::NatsHealth;
+pub use redis::RedisHealth;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;
@@ -15,7 +15,7 @@ trait HealthCheck {
 }
 
 pub async fn get_livez(State(state): State<AppState>) -> impl IntoResponse {
-    let (is_nats_healthy, nats_health_status) = state.nats_health.health_status();
+    let (is_nats_healthy, nats_health_status) = state.redis_health.health_status();
     // We check but don't count message health. Messages should be continuously coming in on
     // production. Until we know whether that is reliable we don't want to fail the health
     // check.

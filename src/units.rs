@@ -1,4 +1,8 @@
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
@@ -35,6 +39,14 @@ impl From<&Slot> for DateTime<Utc> {
     fn from(slot: &Slot) -> Self {
         let seconds = slot.0 as i64 * Slot::SECONDS_PER_SLOT as i64;
         *GENESIS_TIMESTAMP + chrono::Duration::seconds(seconds)
+    }
+}
+
+impl FromStr for Slot {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<i32>().map(Self)
     }
 }
 

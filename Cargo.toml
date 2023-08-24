@@ -4,20 +4,30 @@ version = "1.18.0"
 edition = "2021"
 
 [dependencies]
-anyhow = { version = "1", features = ["backtrace"] }
-async-nats = "0.31"
-async-trait = "0.1"
-axum = "0.6"
-bytes = "1"
-chrono = { version = "0.4", default-features = false }
-flate2 = "1"
-futures = "0.3"
-lazy_static = "1"
+anyhow = { version = "1.0.75", features = ["backtrace"] }
+async-trait = "0.1.73"
+axum = "0.6.20"
+bytes = "1.4.0"
+chrono = { version = "0.4.26", default-features = false }
+flate2 = "1.0.27"
+fred = "6.3.0"
+futures = "0.3.28"
+lazy_static = "1.4.0"
 memory-stats = "1.1.0"
-object_store = { version = "0.6", features = ["aws"] }
-pin-project = "1"
-serde = "1"
-serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
-tracing = "0.1"
+nanoid = "0.4.0"
+object_store = { version = "0.7.0", features = ["aws"] }
+pin-project = "1.1.3"
+# redis = { version = "0.23.2", default-features = false, features = [
+# 	"aio",
+# 	"streams",
+# ] }
+serde = "1.0.185"
+serde_json = "1.0.105"
+tokio = { version = "1.32.0", features = [
+	"macros",
+	"rt-multi-thread",
+	"sync",
+	"time",
+] }
+tracing = "0.1.37"
 tracing-subscriber = "0.3"

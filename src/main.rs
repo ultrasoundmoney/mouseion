@@ -4,48 +4,49 @@
 //!
 //! ## Architecture
 //! The archiver is composed of three main components:
-//! - A message consumer, which consumes messages from the message queue, and puts them on the
-//!   ackable payload queue.
-//! - A bundle aggregator, takes ackable payloads, and aggregates them into bundles by slot.
-//!   Complete bundles are put on the bundle queue.
-//! - An object storage, which takes bundles from the bundle queue, and stores them in object
+//! - A component which pulls in new messages.
+//! - A component which claims pending messages.
+//! - A component which takes the received messages, compresses them, and stores them in object
 //!   storage.
-mod bundle_aggregator;
-mod bundle_shipper;
+//!
+//! The first two components push messages onto a channel. The third component pulls messages off.
+//! The third channel should always be able to process pulled messages within
+//! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
+//! process it also. This is however no big deal, as the storage process is idempotent.
+//!
+//! TODO: the core program is done, there is a lovely amount of polishing which can still be done.
 mod health;
+mod message_archiver;
 mod message_consumer;
 mod object_stores;
-mod operation_constants;
 mod performance;
 mod server;
 mod trace_memory;
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use futures::channel::mpsc::{self};
-use health::{MessageConsumerHealth, NatsHealth};
-use payload_archiver::env;
-use tokio::{sync::Notify, try_join};
-use tracing::{info, Level};
-
-use crate::{
-    bundle_aggregator::BundleAggregator, bundle_shipper::BundleShipper,
-    message_consumer::MessageConsumer,
+use anyhow::Result;
+use fred::{
+    prelude::{ClientLike, RedisClient},
+    types::RedisConfig,
 };
+use health::{MessageConsumerHealth, RedisHealth};
+use payload_archiver::env::{self, ENV_CONFIG};
+use tokio::{
+    sync::{mpsc, Notify},
+    try_join,
+};
+use tracing::{debug, info, Level};
 
-// Maximum number of bundles that can be waiting for shipping. Set to limit memory usage and provide
-// backpressure.
-const MAX_BUNDLE_QUEUE_SIZE: usize = 2;
+use crate::{message_archiver::MessageArchiver, message_consumer::MessageConsumer};
 
-// Maximum number of ackable payloads that can be waiting for aggregation. Set to limit memory
-// usage and provide backpressure.
-const MAX_ACKABLE_PAYLOAD_QUEUE_SIZE: usize = 512;
+const GROUP_NAME: &str = "default-group";
+const MESSAGE_BATCH_SIZE: usize = 8;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     message_health: Arc<MessageConsumerHealth>,
-    nats_health: NatsHealth,
+    redis_health: Arc<RedisHealth>,
 }
 
 #[tokio::main]
@@ -69,48 +70,54 @@ async fn main() -> Result<()> {
 
     let env_config = &env::ENV_CONFIG;
 
-    let nats_uri = std::env::var("NATS_URI").unwrap_or_else(|_| "localhost:4222".to_string());
-    let nats_client = async_nats::connect(nats_uri)
-        .await
-        .context("connecting to NATS")?;
+    let object_store = object_stores::build_env_based_store(env_config)?;
 
-    let nats_health = NatsHealth::new(nats_client.clone());
+    debug!("connecting to Redis");
+    let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
+    let client = RedisClient::new(config, None, None);
+    client.connect();
+    client.wait_for_connect().await?;
+    debug!("connected to Redis");
+
+    let redis_health = Arc::new(RedisHealth::new(client.clone()));
     let message_health = Arc::new(MessageConsumerHealth::new());
 
-    // Ackable payload queue
-    let (ackable_payload_tx, ackable_payload_rx) = mpsc::channel(MAX_ACKABLE_PAYLOAD_QUEUE_SIZE);
-    let message_consumer = MessageConsumer::new(
-        message_health.clone(),
-        nats_client,
-        ackable_payload_tx,
-        shutdown_notify.clone(),
-    )
-    .await;
+    let (message_tx, message_rx) = mpsc::channel(MESSAGE_BATCH_SIZE);
 
-    // Bundle queue
-    let (bundle_tx, bundle_rx) = mpsc::channel(MAX_BUNDLE_QUEUE_SIZE);
-    let bundle_aggregator = Arc::new(BundleAggregator::new(
-        ackable_payload_rx,
-        bundle_tx,
+    let message_consumer = Arc::new(MessageConsumer::new(
+        client.clone(),
         shutdown_notify.clone(),
+        message_tx,
     ));
-    let bundle_aggregator_clone = bundle_aggregator.clone();
 
-    let object_store = object_stores::build_env_based_store(env_config)?;
-    let bundle_shipper = BundleShipper::new(bundle_rx, object_store);
-
-    let message_consumer_thread = tokio::spawn(async move { message_consumer.run().await });
-
-    let bundle_aggregator_complete_bundle_check_thread = tokio::spawn(async move {
-        bundle_aggregator.run_complete_bundle_check().await;
+    let pull_new_messages_thread = tokio::spawn({
+        let message_consumer = message_consumer.clone();
+        async move { message_consumer.run_consume_new_messages().await }
     });
 
-    let bundle_aggregator_consume_ackable_payloads_thread = tokio::spawn(async move {
-        bundle_aggregator_clone.run_consume_ackable_payloads().await;
+    let pull_pending_messages_thread = tokio::spawn({
+        let message_consumer = message_consumer.clone();
+        async move {
+            message_consumer.run_consume_pending_messages().await;
+        }
+    });
+
+    let mut message_archiver = MessageArchiver::new(
+        client.clone(),
+        message_rx,
+        message_health.clone(),
+        object_store,
+        shutdown_notify.clone(),
+    );
+
+    let process_messages_thread = tokio::spawn({
+        async move {
+            message_archiver.run_archive_messages().await;
+        }
     });
 
     let app_state = AppState {
-        nats_health,
+        redis_health,
         message_health,
     };
 
@@ -121,18 +128,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    let bundle_shipper_thread = tokio::spawn({
-        let shutdown_notify = shutdown_notify.clone();
-        async move {
-            bundle_shipper.run(&shutdown_notify).await;
-        }
-    });
-
     try_join!(
-        bundle_aggregator_complete_bundle_check_thread,
-        bundle_aggregator_consume_ackable_payloads_thread,
-        bundle_shipper_thread,
-        message_consumer_thread,
+        pull_new_messages_thread,
+        pull_pending_messages_thread,
+        process_messages_thread,
         server_thread,
     )?;
 

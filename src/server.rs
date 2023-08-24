@@ -4,12 +4,16 @@ use payload_archiver::env::{Env, ENV_CONFIG};
 use tokio::sync::Notify;
 use tracing::{error, info};
 
-use crate::{env, health::get_livez, AppState};
+use crate::{
+    env,
+    health::{self},
+    AppState,
+};
 
 pub async fn serve(state: AppState, shutdown_notify: &Notify) {
     let result = {
         let app = Router::new()
-            .route("/livez", get(get_livez))
+            .route("/livez", get(health::get_livez))
             .with_state(state);
 
         let address = match ENV_CONFIG.env {
