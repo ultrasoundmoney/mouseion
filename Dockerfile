@@ -1,4 +1,6 @@
-FROM rust as builder
+# Until distroless updates glibc to bookworm, with glibc 2.33, we need to use
+# bullseye. See: https://github.com/GoogleContainerTools/distroless/issues/1337
+FROM rust:1-slim-bullseye as builder
 WORKDIR /app
 
 # Build deps
