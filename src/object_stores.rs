@@ -32,9 +32,9 @@ pub fn build_env_based_store(env_config: &EnvConfig) -> Result<Box<dyn ObjectSto
 
     let bucket_name = {
         match env_config.env {
-            Env::Prod => "execution-payload-archive-prod",
-            Env::Stag => "execution-payload-archive-stag",
-            Env::Dev => "execution-payload-archive-dev",
+            Env::Prod => "block-submission-archive-prod",
+            Env::Stag => "block-submission-archive-stag",
+            Env::Dev => "block-submission-archive-dev",
         }
     };
 
