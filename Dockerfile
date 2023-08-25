@@ -1,4 +1,6 @@
-FROM rust as builder
+# Until distroless updates glibc to bookworm, with glibc 2.33, we need to use
+# bullseye. See: https://github.com/GoogleContainerTools/distroless/issues/1337
+FROM rust:1-slim-bullseye as builder
 WORKDIR /app
 
 # Build deps
@@ -13,7 +15,7 @@ RUN sed -i 's#dummy.rs#src/main.rs#' Cargo.toml
 COPY src ./src
 RUN cargo build --release --bin payload-archiver
 
-FROM debian:12-slim AS runtime
+FROM gcr.io/distroless/cc AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/payload-archiver /payload-archiver
-ENTRYPOINT ["/payload-archiver"]
+COPY --from=builder /app/target/release/payload-archiver /app/payload-archiver
+ENTRYPOINT ["/app/payload-archiver"]
