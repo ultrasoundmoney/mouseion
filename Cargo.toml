@@ -3,6 +3,10 @@ name = "payload-archiver"
 version = "2.1.0"
 edition = "2021"
 
+[[bin]]
+name = "payload-archiver"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 async-trait = "0.1.73"
