@@ -1,20 +1,19 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+FROM rust as builder
 WORKDIR /app
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder 
-COPY --from=planner /app/recipe.json recipe.json
-# Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --recipe-path recipe.json
-# Build application
-COPY . .
+# Build deps
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src/
+RUN echo "fn main() {}" > dummy.rs
+RUN sed -i 's#src/main.rs#dummy.rs#' Cargo.toml
 RUN cargo build --release --bin payload-archiver
 
-# We do not need the Rust toolchain to run the binary!
-FROM debian:bullseye-slim AS runtime
+# Build main executable
+RUN sed -i 's#dummy.rs#src/main.rs#' Cargo.toml
+COPY src ./src
+RUN cargo build --release --bin payload-archiver
+
+FROM gcr.io/distroless/cc AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/payload-archiver /usr/local/bin
-ENTRYPOINT ["/usr/local/bin/payload-archiver"]
+COPY --from=builder /app/target/release/payload-archiver /payload-archiver
+ENTRYPOINT ["/payload-archiver"]
