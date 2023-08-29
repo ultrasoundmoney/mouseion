@@ -15,7 +15,7 @@ axum = "0.6.20"
 bytes = "1.4.0"
 chrono = { version = "0.4.26", default-features = false }
 flate2 = "1.0.27"
-fred = "6.3.0"
+fred = { version = "6.3.0", features = ["no-client-setname"] }
 futures = "0.3.28"
 lazy_static = "1.4.0"
 memory-stats = "1.1.0"
