@@ -21,7 +21,6 @@ use tracing::{debug, error, info, trace};
 use crate::{GROUP_NAME, MESSAGE_BATCH_SIZE};
 
 // Claim pending messages that are more than 1 minutes old.
-// Process new messages from a consumer group in a loop.
 const MAX_MESSAGE_PROCESS_DURATION_MS: u64 = 60 * 1000;
 
 lazy_static! {
