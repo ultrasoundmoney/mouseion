@@ -10,8 +10,8 @@ use crate::env::{self, Env, EnvConfig};
 
 fn build_ovh_store(bucket_name: &str) -> Result<AmazonS3> {
     let object_store = AmazonS3Builder::new()
-        .with_endpoint("https://s3.rbx.io.cloud.ovh.net/")
-        .with_region("rbx")
+        .with_endpoint("https://s3.gra.perf.cloud.ovh.net/")
+        .with_region("gra")
         .with_bucket_name(bucket_name)
         .with_secret_access_key(env::get_env_var_unsafe("S3_SECRET_ACCESS_KEY"))
         .with_access_key_id("3a7f56c872164eeb9ea200823ad7b403")
