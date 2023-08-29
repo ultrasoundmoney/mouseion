@@ -22,14 +22,14 @@ pub const STREAM_NAME: &str = "block-submission-archive";
 /// These are block submissions as they came in on the relay, plus some metadata.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ArchiveEntry {
-    eligible_at: u64,
+    eligible_at: i64,
     payload: serde_json::Value,
     received_at: u64,
 }
 
 impl From<HashMap<String, String>> for ArchiveEntry {
     fn from(mut map: HashMap<String, String>) -> Self {
-        let eligible_at: u64 = map.remove("eligible_at").unwrap().parse().unwrap();
+        let eligible_at: i64 = map.remove("eligible_at").unwrap().parse().unwrap();
         let payload: JsonValue = map.remove("payload").unwrap().parse().unwrap();
         let received_at: u64 = map.remove("received_at").unwrap().parse().unwrap();
         Self {
@@ -52,7 +52,7 @@ impl From<ArchiveEntry> for MultipleOrderedPairs {
 }
 
 impl ArchiveEntry {
-    pub fn new(eligible_at: u64, payload: serde_json::Value, received_at: u64) -> Self {
+    pub fn new(eligible_at: i64, payload: serde_json::Value, received_at: u64) -> Self {
         Self {
             eligible_at,
             payload,
