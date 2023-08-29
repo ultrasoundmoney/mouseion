@@ -79,7 +79,10 @@ async fn main() -> Result<()> {
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     let client = RedisClient::new(config, None, None);
     client.connect();
-    client.wait_for_connect().await?;
+    client
+        .wait_for_connect()
+        .await
+        .context("failed to connect to Redis")?;
     debug!("connected to Redis");
 
     let redis_health = Arc::new(RedisHealth::new(client.clone()));
