@@ -25,13 +25,16 @@ mod trace_memory;
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fred::{
     prelude::{ClientLike, RedisClient},
     types::RedisConfig,
 };
 use health::{MessageConsumerHealth, RedisHealth};
-use payload_archiver::env::{self, ENV_CONFIG};
+use payload_archiver::{
+    env::{self, ENV_CONFIG},
+    log,
+};
 use tokio::{
     sync::{mpsc, Notify},
     try_join,
@@ -51,7 +54,7 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    log::init_with_env();
 
     info!("starting payload archiver");
 

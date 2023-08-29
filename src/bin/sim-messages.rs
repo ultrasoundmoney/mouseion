@@ -9,7 +9,7 @@ use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
     types::RedisConfig,
 };
-use payload_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
+use payload_archiver::{env::ENV_CONFIG, log, ArchiveEntry, STREAM_NAME};
 use tracing::{debug, info};
 
 fn decompress_gz_to_file(input_path: &str, output_path: &str) -> Result<(), std::io::Error> {
@@ -96,7 +96,7 @@ const STATE_ROOTS: [&str; 55] = [
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    log::init_with_env();
 
     info!("publishing simulation messages");
 

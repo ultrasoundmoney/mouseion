@@ -2,6 +2,7 @@
 name = "payload-archiver"
 version = "2.1.0"
 edition = "2021"
+default-run = "payload-archiver"
 
 [[bin]]
 name = "payload-archiver"
@@ -34,4 +35,7 @@ tokio = { version = "1.32.0", features = [
 	"time",
 ] }
 tracing = "0.1.37"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3.17", default-features = true, features = [
+	"env-filter",
+	"json",
+] }

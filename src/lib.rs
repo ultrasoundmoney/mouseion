@@ -1,5 +1,6 @@
 mod archive_entries;
 pub mod env;
+pub mod log;
 pub mod units;
 
 pub use archive_entries::ArchiveEntry;
