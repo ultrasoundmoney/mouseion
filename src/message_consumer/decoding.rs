@@ -3,6 +3,7 @@ use fred::{
     types::{FromRedis, RedisKey, RedisValue},
 };
 use payload_archiver::{ArchiveEntry, STREAM_NAME};
+use tracing::trace;
 
 use super::IdArchiveEntryPair;
 
@@ -60,6 +61,7 @@ pub struct XAutoClaimResponse(pub String, pub Vec<IdArchiveEntryPair>);
 
 impl FromRedis for XAutoClaimResponse {
     fn from_value(value: RedisValue) -> RedisResult<Self> {
+        trace!(?value);
         let mut iter = value.into_array().into_iter();
         let next_autoclaim_id = iter
             .next()
