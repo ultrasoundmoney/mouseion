@@ -44,7 +44,7 @@ use tracing::{debug, info, Level};
 use crate::{message_archiver::MessageArchiver, message_consumer::MessageConsumer};
 
 const GROUP_NAME: &str = "default-group";
-const MESSAGE_BATCH_SIZE: u64 = 8;
+const MESSAGE_BATCH_SIZE: u64 = 16;
 
 #[derive(Clone)]
 pub struct AppState {
