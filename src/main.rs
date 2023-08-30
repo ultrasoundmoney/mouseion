@@ -46,7 +46,7 @@ use crate::{message_archiver::MessageArchiver, message_consumer::MessageConsumer
 const GROUP_NAME: &str = "default-group";
 const MESSAGE_BATCH_SIZE: u64 = 8;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     message_health: Arc<MessageConsumerHealth>,
     redis_health: Arc<RedisHealth>,

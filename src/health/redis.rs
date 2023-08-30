@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use fred::{
     prelude::{ClientLike, RedisClient},
     types::ClientState,
@@ -10,12 +8,6 @@ use super::HealthCheck;
 #[derive(Clone)]
 pub struct RedisHealth {
     redis: RedisClient,
-}
-
-impl Debug for RedisHealth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RedisHealth").finish()
-    }
 }
 
 impl RedisHealth {
