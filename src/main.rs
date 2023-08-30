@@ -15,8 +15,8 @@
 //! process it also. This is however no big deal, as the storage process is idempotent.
 //!
 //! TODO: the core program is done, there is a lovely amount of polishing which can still be done.
+mod archiver;
 mod health;
-mod message_archiver;
 mod message_consumer;
 mod object_stores;
 mod performance;
@@ -41,7 +41,7 @@ use tokio::{
 };
 use tracing::{debug, info, Level};
 
-use crate::{message_archiver::MessageArchiver, message_consumer::MessageConsumer};
+use crate::{archiver::Archiver, message_consumer::MessageConsumer};
 
 const GROUP_NAME: &str = "default-group";
 const MESSAGE_BATCH_SIZE: u64 = 8;
@@ -92,6 +92,7 @@ async fn main() -> Result<()> {
 
     let message_consumer = Arc::new(MessageConsumer::new(
         redis_client.clone(),
+        message_health.clone(),
         shutdown_notify.clone(),
         archive_entries_tx,
     ));
@@ -111,9 +112,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    let mut message_archiver = MessageArchiver::new(
+    let mut message_archiver = Archiver::new(
         redis_client.clone(),
-        message_health.clone(),
         archive_entries_rx,
         object_store,
         shutdown_notify.clone(),
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
 
     let process_messages_thread = tokio::spawn({
         async move {
-            message_archiver.run_archive_messages().await;
+            message_archiver.run_archive_entries().await;
         }
     });
 

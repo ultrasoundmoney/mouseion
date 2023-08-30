@@ -17,7 +17,7 @@ use tokio::{
 };
 use tracing::{debug, error, info, trace};
 
-use crate::{GROUP_NAME, MESSAGE_BATCH_SIZE};
+use crate::{health::MessageConsumerHealth, GROUP_NAME, MESSAGE_BATCH_SIZE};
 
 use decoding::{ConsumerInfo, XAutoClaimResponse, XReadGroupResponse};
 
@@ -50,6 +50,7 @@ impl IdArchiveEntryPair {
 
 pub struct MessageConsumer {
     client: RedisClient,
+    message_health: MessageConsumerHealth,
     shutdown_notify: Arc<Notify>,
     tx: mpsc::Sender<IdArchiveEntryPair>,
 }
@@ -57,11 +58,13 @@ pub struct MessageConsumer {
 impl MessageConsumer {
     pub fn new(
         client: RedisClient,
+        message_health: MessageConsumerHealth,
         shutdown_notify: Arc<Notify>,
         tx: mpsc::Sender<IdArchiveEntryPair>,
     ) -> Self {
         Self {
             client,
+            message_health,
             shutdown_notify,
             tx,
         }
@@ -128,6 +131,8 @@ impl MessageConsumer {
             for id_archive_entry_pair in id_archive_entry_pairs {
                 self.tx.send(id_archive_entry_pair).await?;
             }
+
+            self.message_health.set_last_message_received_now();
         }
     }
 

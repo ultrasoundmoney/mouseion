@@ -12,44 +12,40 @@ use tokio::{
 };
 use tracing::{debug, error, info};
 
-use crate::{health::MessageConsumerHealth, message_consumer::IdArchiveEntryPair};
+use crate::message_consumer::IdArchiveEntryPair;
 
 const MAX_CONCURRENT: usize = 4;
 
-pub struct MessageArchiver<OS: ObjectStore> {
+pub struct Archiver<OS: ObjectStore> {
     client: RedisClient,
-    message_rx: Receiver<IdArchiveEntryPair>,
-    message_health: MessageConsumerHealth,
+    archive_entries_rx: Receiver<IdArchiveEntryPair>,
     object_store: Arc<OS>,
     shutdown_notify: Arc<Notify>,
 }
 
-impl<OS: ObjectStore> MessageArchiver<OS> {
+impl<OS: ObjectStore> Archiver<OS> {
     pub fn new(
         client: RedisClient,
-        message_rx: mpsc::Receiver<IdArchiveEntryPair>,
-        message_health: MessageConsumerHealth,
+        archive_entries_rx: mpsc::Receiver<IdArchiveEntryPair>,
         object_store: OS,
         shutdown_notify: Arc<Notify>,
     ) -> Self {
         Self {
             client,
-            message_rx,
-            message_health,
+            archive_entries_rx,
             object_store: Arc::new(object_store),
             shutdown_notify,
         }
     }
 
-    async fn archive_messages(&mut self) -> Result<()> {
+    async fn archive_entries(&mut self) -> Result<()> {
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
 
-        while let Some(id_archive_entry_pair) = self.message_rx.recv().await {
+        while let Some(id_archive_entry_pair) = self.archive_entries_rx.recv().await {
             tokio::spawn({
                 let permit = semaphore.clone().acquire_owned().await.unwrap();
                 let object_store = self.object_store.clone();
                 let client = self.client.clone();
-                let message_health = self.message_health.clone();
                 async move {
                     let json_gz_bytes = id_archive_entry_pair.entry.compress().await?;
 
@@ -58,8 +54,6 @@ impl<OS: ObjectStore> MessageArchiver<OS> {
                         .await?;
 
                     id_archive_entry_pair.ack(&client).await?;
-
-                    message_health.set_last_message_received_now();
 
                     drop(permit);
 
@@ -71,14 +65,14 @@ impl<OS: ObjectStore> MessageArchiver<OS> {
         Ok(())
     }
 
-    pub async fn run_archive_messages(&mut self) {
+    pub async fn run_archive_entries(&mut self) {
         debug!("archiving received IdArchiveEntryPairs");
         let shutdown_notify = self.shutdown_notify.clone();
         select! {
             _ = shutdown_notify.notified() => {
                 debug!("shutting down process messages thread");
             }
-            result = self.archive_messages() => {
+            result = self.archive_entries() => {
                 match result {
                     Ok(_) => info!("stopped processing messages"),
                     Err(e) => {
