@@ -24,10 +24,10 @@ pub async fn get_livez(State(state): State<AppState>) -> impl IntoResponse {
     let message = json!({ "nats": nats_health_status, "messages": messages_health_status });
 
     if is_nats_healthy {
-        debug!(health_check = %message);
+        debug!(nats = nats_health_status, messages = messages_health_status);
         (StatusCode::OK, Json(message))
     } else {
-        warn!(health_check = %message);
+        warn!(nats = nats_health_status, messages = messages_health_status);
         (StatusCode::SERVICE_UNAVAILABLE, Json(message))
     }
 }
