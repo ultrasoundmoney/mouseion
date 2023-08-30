@@ -149,6 +149,8 @@ impl MessageConsumer {
     }
 
     pub async fn delete_dead_consumers(&self) -> Result<()> {
+        Self::ensure_consumer_group_exists(&self.client).await?;
+
         let consumers: Vec<ConsumerInfo> =
             self.client.xinfo_consumers(STREAM_NAME, GROUP_NAME).await?;
 
@@ -189,6 +191,8 @@ impl MessageConsumer {
     // try not to crash, and have this function which claims any pending messages that have hit
     // MAX_MESSAGE_PROCESS_DURATION_MS. A message getting processed twice is fine.
     pub async fn consume_pending_messages(&self) -> Result<()> {
+        Self::ensure_consumer_group_exists(&self.client).await?;
+
         // Redis scans a finite number of pending messages and provides us with an ID to continue
         // in case there were more messages pending than we claimed.
         let mut autoclaim_id: String = "0-0".to_string();
