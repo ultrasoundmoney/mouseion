@@ -215,20 +215,25 @@ impl MessageConsumer {
                 )
                 .await?;
 
+            debug!(
+                autoclaim_id,
+                count = messages.len(),
+                "claimed pending messages"
+            );
+
             autoclaim_id = next_autoclaim_id;
 
-            if messages.is_empty() {
-                // No pending messages, sleep for a bit.
+            for id_archive_entry_pair in messages {
+                self.tx.send(id_archive_entry_pair).await?;
+            }
+
+            if autoclaim_id == "0-0" {
+                // No messages pending, sleep to avoid polling constantly.
                 trace!(
                     "no pending messages, sleeping for {}s",
                     PULL_PENDING_TIMEOUT.as_secs()
                 );
                 tokio::time::sleep(*PULL_PENDING_TIMEOUT).await;
-            } else {
-                debug!(count = messages.len(), "claimed pending messages");
-                for id_archive_entry_pair in messages {
-                    self.tx.send(id_archive_entry_pair).await?;
-                }
             }
         }
     }

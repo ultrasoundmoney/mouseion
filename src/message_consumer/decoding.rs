@@ -75,7 +75,8 @@ impl FromRedis for XAutoClaimResponse {
             .next()
             .expect("expected message at index 1")
             .into_array();
-        // Sometimes this is an array of NILs, unclear why. We deal with it by skipping them.
+        // Sometimes this is an array of NILs, unclear why. We deal with it by skipping them. This
+        // may be because messages are pending, but their data has already been dropped by Redis.
         let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
         for message in messages {
             match message {
