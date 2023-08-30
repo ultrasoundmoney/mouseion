@@ -75,15 +75,13 @@ async fn main() -> Result<()> {
 
     let object_store = object_stores::build_env_based_store(env_config)?;
 
-    debug!("connecting to Redis");
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
-    let client = RedisClient::new(config, None, None);
-    client.connect();
-    client
+    let redis_client = RedisClient::new(config, None, None);
+    redis_client.connect();
+    redis_client
         .wait_for_connect()
         .await
         .context("failed to connect to Redis")?;
-    debug!("connected to Redis");
 
     let redis_health = RedisHealth::new(redis_client.clone());
     let message_health = MessageConsumerHealth::new();
@@ -91,7 +89,7 @@ async fn main() -> Result<()> {
     let (message_tx, message_rx) = mpsc::channel(MESSAGE_BATCH_SIZE as usize);
 
     let message_consumer = Arc::new(MessageConsumer::new(
-        client.clone(),
+        redis_client.clone(),
         shutdown_notify.clone(),
         message_tx,
     ));
@@ -112,7 +110,7 @@ async fn main() -> Result<()> {
     });
 
     let mut message_archiver = MessageArchiver::new(
-        client.clone(),
+        redis_client.clone(),
         message_rx,
         message_health.clone(),
         object_store,
