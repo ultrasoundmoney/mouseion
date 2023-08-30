@@ -1,3 +1,4 @@
+//! Decoding of Redis responses into Rust types.
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
     types::{FromRedis, RedisKey, RedisValue},
