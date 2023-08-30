@@ -2,13 +2,12 @@
 //! TODO: instead of using of using XAUTOCLAIM, use XPENDING to find out which consumers are
 //! holding pending messages. Claim their messages, process them, and then delete the consumer.
 //! Consider switching to more popular `redis` crate.
-use std::{collections::HashMap, sync::Arc};
+mod decoding;
+
+use std::{fmt::Debug, sync::Arc};
 
 use anyhow::{bail, Result};
-use fred::{
-    prelude::{RedisClient, RedisResult, StreamsInterface},
-    types::RedisValue,
-};
+use fred::prelude::{RedisClient, StreamsInterface};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
 use payload_archiver::{ArchiveEntry, STREAM_NAME};
@@ -20,8 +19,15 @@ use tracing::{debug, error, info, trace};
 
 use crate::{GROUP_NAME, MESSAGE_BATCH_SIZE};
 
+use decoding::{ConsumerInfo, XAutoClaimResponse, XReadGroupResponse};
+
 // Claim pending messages that are more than 1 minutes old.
 const MAX_MESSAGE_PROCESS_DURATION_MS: u64 = 60 * 1000;
+// In order to avoid polling we use Redis' BLOCK option. This is the maximum time we'll want Redis
+// to wait for new data before returning an empty response.
+const BLOCK_DURATION_MS: u64 = 8000;
+// After a consumer has been idle for 8 minutes, we consider it crashed and remove it.
+const MAX_CONSUMER_IDLE_MS: u64 = 8 * 60 * 1000;
 
 lazy_static! {
     // 64^4 collision space.
@@ -29,24 +35,10 @@ lazy_static! {
     static ref PULL_PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 }
 
+#[derive(Debug)]
 pub struct IdArchiveEntryPair {
     pub id: String,
     pub entry: ArchiveEntry,
-}
-
-impl From<RedisValue> for IdArchiveEntryPair {
-    fn from(value: RedisValue) -> Self {
-        match value {
-            RedisValue::Array(mut array) => {
-                let id: String = array.remove(0).convert().unwrap();
-                let raw_entry: HashMap<String, String> = array.remove(0).convert().unwrap();
-                let entry = raw_entry.into();
-
-                Self { id, entry }
-            }
-            _ => panic!("expected RedisValue::Array with id and message"),
-        }
-    }
 }
 
 impl IdArchiveEntryPair {
@@ -55,9 +47,6 @@ impl IdArchiveEntryPair {
         Ok(())
     }
 }
-
-// Consider converting from RedisValue directly.
-type PendingMessages = (String, Vec<(String, HashMap<String, String>)>);
 
 pub struct MessageConsumer {
     client: RedisClient,
@@ -97,17 +86,18 @@ impl MessageConsumer {
         Ok(())
     }
 
+    /// Pulls new messages from Redis and sends them to the archiver.
     async fn retrieve_new_messages(&self) -> Result<()> {
         Self::ensure_consumer_group_exists(&self.client).await?;
 
         loop {
-            let result: RedisResult<RedisValue> = self
+            let result: XReadGroupResponse = self
                 .client
                 .xreadgroup(
                     GROUP_NAME,
                     &*CONSUMER_ID,
-                    Some(MESSAGE_BATCH_SIZE as u64),
-                    None,
+                    Some(MESSAGE_BATCH_SIZE),
+                    Some(BLOCK_DURATION_MS),
                     false,
                     STREAM_NAME,
                     // The > operator means we only get new messages, not old ones. This also means if
@@ -117,44 +107,30 @@ impl MessageConsumer {
                     // will be claimed by another consumer.
                     ">",
                 )
-                .await;
+                .await?;
 
-            let messages = {
-                match result? {
-                    RedisValue::Array(mut streams) => {
-                        // This consumer group only returns results for one stream. Take the first.
-                        let stream = streams.remove(0);
-                        match stream {
-                            RedisValue::Array(mut unknown) => {
-                                // Is always STREAM_NAME
-                                let messages = unknown.remove(1);
-                                match messages {
-                                    RedisValue::Array(messages) => messages,
-                                    _ => bail!("expected RedisValue::Array"),
-                                }
-                            }
-                            _ => bail!("expected RedisValue::Array containing name and messages"),
-                        }
-                    }
-                    RedisValue::Null => {
-                        // No new messages, sleep for a bit.
-                        trace!("no new messages, sleeping for 1s");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-                    _ => bail!("expected RedisValue::Array containing streams"),
+            let id_archive_entry_pairs: Vec<IdArchiveEntryPair> = match result.0 {
+                Some(id_archive_entry_pairs) => id_archive_entry_pairs,
+                None => {
+                    // No new messages available.
+                    trace!("no new messages, sleeping for 1s");
+                    continue;
                 }
             };
 
-            debug!(count = messages.len(), "received new messages");
+            debug!(
+                count = id_archive_entry_pairs.len(),
+                "received new messages"
+            );
 
-            for message in messages {
-                self.tx.send(message.into()).await?;
+            for id_archive_entry_pair in id_archive_entry_pairs {
+                self.tx.send(id_archive_entry_pair).await?;
             }
         }
     }
 
     pub async fn run_consume_new_messages(&self) {
+        debug!("pulling new messages");
         select! {
             _ = self.shutdown_notify.notified() => {
                 info!("pulling new messages thread shutting down");
@@ -172,29 +148,69 @@ impl MessageConsumer {
         }
     }
 
+    pub async fn delete_dead_consumers(&self) -> Result<()> {
+        let consumers: Vec<ConsumerInfo> =
+            self.client.xinfo_consumers(STREAM_NAME, GROUP_NAME).await?;
+
+        if consumers.is_empty() {
+            // No consumers, nothing to do.
+            debug!("no consumers, nothing to clean up");
+            return Ok(());
+        }
+
+        debug!(count = consumers.len(), "found consumers");
+
+        for consumer in consumers {
+            if consumer.pending == 0 && consumer.idle > MAX_CONSUMER_IDLE_MS {
+                info!(
+                    name = consumer.name,
+                    idle_seconds = consumer.idle / 1000,
+                    "removing long-idle, likely dead consumer"
+                );
+                self.client
+                    .xgroup_delconsumer(STREAM_NAME, GROUP_NAME, &consumer.name)
+                    .await?;
+            } else {
+                trace!(
+                    name = consumer.name,
+                    pending = consumer.pending,
+                    idle = consumer.idle,
+                    "consumer looks alive, leaving it"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     // When a consumer crashes, it forgets its ID and any delivered but unacked messages will sit
     // forever as pending messages for the consumer. Although it is easy to give consumers stable IDs
     // we'd still have the same problem when scaling down the number of active consumers. Instead, we
     // try not to crash, and have this function which claims any pending messages that have hit
     // MAX_MESSAGE_PROCESS_DURATION_MS. A message getting processed twice is fine.
     pub async fn consume_pending_messages(&self) -> Result<()> {
+        // Redis scans a finite number of pending messages and provides us with an ID to continue
+        // in case there were more messages pending than we claimed.
+        let mut autoclaim_id: String = "0-0".to_string();
+
         loop {
-            let result: RedisResult<PendingMessages> = self
+            let XAutoClaimResponse(next_autoclaim_id, messages) = self
                 .client
-                .xautoclaim_values(
+                .xautoclaim(
                     STREAM_NAME,
                     GROUP_NAME,
                     &*CONSUMER_ID,
                     MAX_MESSAGE_PROCESS_DURATION_MS,
-                    "0-0",
-                    None,
+                    &autoclaim_id,
+                    Some(MESSAGE_BATCH_SIZE),
                     false,
                 )
-                .await;
+                .await?;
 
-            let (_stream_key, messages) = result?;
+            autoclaim_id = next_autoclaim_id;
 
             if messages.is_empty() {
+                // No pending messages, sleep for a bit.
                 trace!(
                     "no pending messages, sleeping for {}s",
                     PULL_PENDING_TIMEOUT.as_secs()
@@ -202,13 +218,8 @@ impl MessageConsumer {
                 tokio::time::sleep(*PULL_PENDING_TIMEOUT).await;
             } else {
                 debug!(count = messages.len(), "claimed pending messages");
-                for (id, map) in messages {
-                    self.tx
-                        .send(IdArchiveEntryPair {
-                            id,
-                            entry: map.into(),
-                        })
-                        .await?;
+                for id_archive_entry_pair in messages {
+                    self.tx.send(id_archive_entry_pair).await?;
                 }
             }
         }

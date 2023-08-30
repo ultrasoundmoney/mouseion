@@ -1,36 +1,37 @@
 use std::{collections::HashMap, io::Write};
 
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use bytes::Bytes;
 use chrono::{Datelike, Timelike};
 use flate2::{write::GzEncoder, Compression};
-use fred::types::MultipleOrderedPairs;
+use fred::{
+    prelude::{RedisError, RedisErrorKind},
+    types::{FromRedis, MultipleOrderedPairs, RedisValue},
+};
 use object_store::path::Path;
 use serde::{Deserialize, Serialize};
 use tokio::task::spawn_blocking;
 use tracing::debug;
 
-use crate::{units::Slot, JsonValue};
+use crate::units::Slot;
 
 /// Block submission archive entries.
 /// These are block submissions as they came in on the relay, plus some metadata.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ArchiveEntry {
     eligible_at: i64,
     payload: serde_json::Value,
     received_at: u64,
 }
 
-impl From<HashMap<String, String>> for ArchiveEntry {
-    fn from(mut map: HashMap<String, String>) -> Self {
-        let eligible_at: i64 = map.remove("eligible_at").unwrap().parse().unwrap();
-        let payload: JsonValue = map.remove("payload").unwrap().parse().unwrap();
-        let received_at: u64 = map.remove("received_at").unwrap().parse().unwrap();
-        Self {
-            eligible_at,
-            payload,
-            received_at,
-        }
+impl std::fmt::Debug for ArchiveEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_root = self.state_root();
+        f.debug_struct("ArchiveEntry")
+            .field("eligible_at", &self.eligible_at)
+            .field("payload", &format!("<PAYLOAD_JSON:{state_root}>"))
+            .field("received_at", &self.received_at)
+            .finish()
     }
 }
 
@@ -42,6 +43,44 @@ impl From<ArchiveEntry> for MultipleOrderedPairs {
             ("received_at".into(), entry.received_at.to_string()),
         ];
         pairs.try_into().unwrap()
+    }
+}
+
+impl FromRedis for ArchiveEntry {
+    fn from_value(value: RedisValue) -> Result<Self, RedisError> {
+        let mut map: HashMap<String, Bytes> = value.convert()?;
+        let eligible_at = {
+            let bytes = map
+                .remove("eligible_at")
+                .expect("expect eligible_at in archive entry")
+                .to_vec();
+            let str = String::from_utf8(bytes)?;
+            str.parse::<i64>()?
+        };
+        let received_at = {
+            let bytes = map
+                .remove("received_at")
+                .expect("expect received_at in archive entry")
+                .to_vec();
+            let str = String::from_utf8(bytes)?;
+            str.parse::<u64>()?
+        };
+        let payload = {
+            let bytes = map
+                .remove("payload")
+                .expect("expect payload in archive entry")
+                .to_vec();
+            // We could implement custom Deserialize for this to avoid parsing the JSON here, we
+            // don't do anything with it besides Serialize it later.
+            serde_json::from_slice(&bytes)
+                .context("failed to parse archive entry payload as JSON")
+                .map_err(|err| RedisError::new(RedisErrorKind::Parse, err.to_string()))?
+        };
+        Ok(Self {
+            eligible_at,
+            payload,
+            received_at,
+        })
     }
 }
 
