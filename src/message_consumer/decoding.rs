@@ -31,21 +31,23 @@ impl FromRedis for XReadGroupResponse {
                     .next()
                     .expect("expect messages at index 1")
                     .into_array();
+
                 let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
 
-                for value in messages {
-                    match value {
-                        RedisValue::Array(mut array) => {
-                            let id: String = array.remove(0).convert().unwrap();
-                            let entry: ArchiveEntry = array.remove(0).convert().unwrap();
-                            let id_archive_entry_pair = IdArchiveEntryPair { id, entry };
-                            id_archive_entry_pairs.push(id_archive_entry_pair);
-                        }
-                        _ => Err(RedisError::new(
-                            RedisErrorKind::Parse,
-                            "expected RedisValue::Array with id and message",
-                        ))?,
-                    }
+                for message in messages {
+                    let mut iter = message.into_array().into_iter();
+                    let id: String = iter
+                        .next()
+                        .expect("expected index 0 to be id")
+                        .convert()
+                        .unwrap();
+                    let entry: ArchiveEntry = iter
+                        .next()
+                        .expect("expected index 1 to be archive entry")
+                        .convert()
+                        .unwrap();
+                    let id_archive_entry_pair = IdArchiveEntryPair { id, entry };
+                    id_archive_entry_pairs.push(id_archive_entry_pair);
                 }
 
                 Ok(Self(Some(id_archive_entry_pairs)))
@@ -53,7 +55,7 @@ impl FromRedis for XReadGroupResponse {
             RedisValue::Null => Ok(Self(None)),
             _ => Err(RedisError::new(
                 RedisErrorKind::Parse,
-                "expected RedisValue::Array containing streams",
+                "expected array containing streams",
             )),
         }
     }
