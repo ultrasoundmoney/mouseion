@@ -48,8 +48,8 @@ const MESSAGE_BATCH_SIZE: u64 = 8;
 
 #[derive(Clone)]
 pub struct AppState {
-    message_health: Arc<MessageConsumerHealth>,
-    redis_health: Arc<RedisHealth>,
+    message_health: MessageConsumerHealth,
+    redis_health: RedisHealth,
 }
 
 #[tokio::main]
@@ -85,8 +85,8 @@ async fn main() -> Result<()> {
         .context("failed to connect to Redis")?;
     debug!("connected to Redis");
 
-    let redis_health = Arc::new(RedisHealth::new(client.clone()));
-    let message_health = Arc::new(MessageConsumerHealth::new());
+    let redis_health = RedisHealth::new(redis_client.clone());
+    let message_health = MessageConsumerHealth::new();
 
     let (message_tx, message_rx) = mpsc::channel(MESSAGE_BATCH_SIZE as usize);
 
