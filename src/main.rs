@@ -13,8 +13,6 @@
 //! The third channel should always be able to process pulled messages within
 //! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
 //! process it also. This is however no big deal, as the storage process is idempotent.
-//!
-//! TODO: the core program is done, there is a lovely amount of polishing which can still be done.
 mod archiver;
 mod health;
 mod message_consumer;

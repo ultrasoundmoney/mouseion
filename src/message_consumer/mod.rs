@@ -1,7 +1,4 @@
 //! Pulls new messages from Redis and sends them to the archiver.
-//! TODO: instead of using of using XAUTOCLAIM, use XPENDING to find out which consumers are
-//! holding pending messages. Claim their messages, process them, and then delete the consumer.
-//! Consider switching to more popular `redis` crate.
 mod decoding;
 
 use std::{fmt::Debug, sync::Arc};
