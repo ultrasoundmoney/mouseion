@@ -68,6 +68,8 @@ impl MessageConsumer {
     }
 
     async fn ensure_consumer_group_exists(client: &RedisClient) -> Result<()> {
+        debug!("ensuring consumer group exists");
+
         // If no consumer group exists, create one, if it already exists, we'll get an error we can
         // ignore.
         let result: std::result::Result<(), fred::prelude::RedisError> = client
