@@ -1,3 +1,3 @@
 # Payload Archiver
 
-Takes the many execution payloads that the relay receives, over a message queue, bundles them by slot, and stores them in cheap Object Storage.
+Takes the many block submissions that a relay receives, over a Redis stream, and stores them in cheap Object Storage.
