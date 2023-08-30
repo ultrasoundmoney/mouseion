@@ -44,7 +44,8 @@ use tracing::{debug, info, Level};
 use crate::{message_archiver::MessageArchiver, message_consumer::MessageConsumer};
 
 const GROUP_NAME: &str = "default-group";
-const MESSAGE_BATCH_SIZE: u64 = 16;
+const MESSAGE_BATCH_SIZE: u64 = 8;
+const ARCHIVE_ENTRIES_BUFFER_SIZE: u64 = MESSAGE_BATCH_SIZE * 4;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -86,12 +87,13 @@ async fn main() -> Result<()> {
     let redis_health = RedisHealth::new(redis_client.clone());
     let message_health = MessageConsumerHealth::new();
 
-    let (message_tx, message_rx) = mpsc::channel(MESSAGE_BATCH_SIZE as usize);
+    let (archive_entries_tx, archive_entries_rx) =
+        mpsc::channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
 
     let message_consumer = Arc::new(MessageConsumer::new(
         redis_client.clone(),
         shutdown_notify.clone(),
-        message_tx,
+        archive_entries_tx,
     ));
 
     debug!("deleting dead consumers");
@@ -111,8 +113,8 @@ async fn main() -> Result<()> {
 
     let mut message_archiver = MessageArchiver::new(
         redis_client.clone(),
-        message_rx,
         message_health.clone(),
+        archive_entries_rx,
         object_store,
         shutdown_notify.clone(),
     );
