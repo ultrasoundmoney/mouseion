@@ -11,14 +11,14 @@ lazy_static! {
 pub fn init_with_env() {
     let env_filter = EnvFilter::from_default_env();
 
-    let subscriber: Box<dyn Subscriber + Send + Sync> = if (*ENV_CONFIG).pretty_print {
+    let subscriber: Box<dyn Subscriber + Send + Sync> = if ENV_CONFIG.pretty_print {
         Box::new(
             fmt::Subscriber::builder()
                 .with_env_filter(env_filter)
                 .finish(),
         )
     } else {
-        match (*ENV_CONFIG).env {
+        match ENV_CONFIG.env {
             Env::Dev => Box::new(
                 fmt::Subscriber::builder()
                     .with_env_filter(env_filter)
