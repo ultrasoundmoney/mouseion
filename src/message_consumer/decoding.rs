@@ -65,16 +65,17 @@ impl FromRedis for XAutoClaimResponse {
             .next()
             .expect("expect autoclaim_id at index 0")
             .convert()?;
-        let messages = iter.next().expect("expect message at index 1").into_array();
+        let messages = iter
+            .next()
+            .expect("expected message at index 1")
+            .into_array();
         let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
         for message in messages {
             let id_archive_pair = {
                 let mut iter = message.into_array().into_iter();
-                let id: String = iter.next().expect("expect id at index 0").convert()?;
-                let entry: ArchiveEntry = iter
-                    .next()
-                    .expect("expect raw_entry at index 1")
-                    .convert()?;
+                let id: String = iter.next().expect("expected id at index 0").convert()?;
+                let entry: ArchiveEntry =
+                    iter.next().expect("expected entry at index 1").convert()?;
                 IdArchiveEntryPair { id, entry }
             };
             id_archive_entry_pairs.push(id_archive_pair);
