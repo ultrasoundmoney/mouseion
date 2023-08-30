@@ -100,12 +100,10 @@ async fn main() -> Result<()> {
 
     info!("publishing simulation messages");
 
-    debug!("connecting to Redis");
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     let client = RedisClient::new(config, None, None);
     client.connect();
-    client.wait_for_connect().await?;
-    debug!("connected to Redis");
+
     let input_paths = STATE_ROOTS
         .iter()
         .map(|state_root| format!("example_payloads/{}.json.gz", state_root));
