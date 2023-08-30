@@ -73,16 +73,25 @@ impl FromRedis for XAutoClaimResponse {
             .next()
             .expect("expected message at index 1")
             .into_array();
+        // Sometimes this is an array of NILs, unclear why. We deal with it by skipping them.
         let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
         for message in messages {
-            let id_archive_pair = {
-                let mut iter = message.into_array().into_iter();
-                let id: String = iter.next().expect("expected id at index 0").convert()?;
-                let entry: ArchiveEntry =
-                    iter.next().expect("expected entry at index 1").convert()?;
-                IdArchiveEntryPair { id, entry }
-            };
-            id_archive_entry_pairs.push(id_archive_pair);
+            match message {
+                RedisValue::Null => {
+                    debug!("nil message in XAUTOCLAIM response, skipping");
+                    continue;
+                }
+                message => {
+                    let id_archive_pair = {
+                        let mut iter = message.into_array().into_iter();
+                        let id: String = iter.next().expect("expected id at index 0").convert()?;
+                        let entry: ArchiveEntry =
+                            iter.next().expect("expected entry at index 1").convert()?;
+                        IdArchiveEntryPair { id, entry }
+                    };
+                    id_archive_entry_pairs.push(id_archive_pair);
+                }
+            }
         }
         Ok(Self(next_autoclaim_id, id_archive_entry_pairs))
     }
