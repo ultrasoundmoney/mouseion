@@ -27,8 +27,7 @@ const BLOCK_DURATION_MS: u64 = 8000;
 const MAX_CONSUMER_IDLE_MS: u64 = 8 * 60 * 1000;
 
 lazy_static! {
-    // 64^4 collision space.
-    static ref CONSUMER_ID: String = nanoid!(4);
+    static ref CONSUMER_ID: String = ENV_CONFIG.pod_name.clone().unwrap_or(nanoid!(4));
     static ref PULL_PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 }
 
