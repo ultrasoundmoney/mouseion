@@ -98,6 +98,9 @@ async fn main() -> Result<()> {
     debug!("deleting dead consumers");
     message_consumer.delete_dead_consumers().await?;
 
+    debug!("ensuring a consumer group exists");
+    message_consumer.ensure_consumer_group_exists().await?;
+
     let pull_new_messages_thread = tokio::spawn({
         let message_consumer = message_consumer.clone();
         async move { message_consumer.run_consume_new_messages().await }

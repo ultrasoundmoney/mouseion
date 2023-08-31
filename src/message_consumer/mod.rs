@@ -10,10 +10,10 @@ mod decoding;
 use std::{fmt::Debug, sync::Arc};
 
 use anyhow::{bail, Result};
-use fred::prelude::{RedisClient, StreamsInterface};
+use fred::prelude::{RedisClient, RedisResult, StreamsInterface};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
-use payload_archiver::{ArchiveEntry, STREAM_NAME};
+use payload_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
 use tokio::{
     select,
     sync::{mpsc, Notify},
@@ -72,12 +72,11 @@ impl MessageConsumer {
         }
     }
 
-    async fn ensure_consumer_group_exists(client: &RedisClient) -> Result<()> {
-        debug!("ensuring consumer group exists");
-
+    pub async fn ensure_consumer_group_exists(&self) -> Result<()> {
         // If no consumer group exists, create one, if it already exists, we'll get an error we can
         // ignore.
-        let result: std::result::Result<(), fred::prelude::RedisError> = client
+        let result: RedisResult<()> = self
+            .client
             .xgroup_create(STREAM_NAME, GROUP_NAME, "0", false)
             .await;
 
@@ -95,8 +94,6 @@ impl MessageConsumer {
 
     /// Pulls new messages from Redis and sends them to the archiver.
     async fn retrieve_new_messages(&self) -> Result<()> {
-        Self::ensure_consumer_group_exists(&self.client).await?;
-
         loop {
             let result: XReadGroupResponse = self
                 .client
@@ -158,8 +155,6 @@ impl MessageConsumer {
     }
 
     pub async fn delete_dead_consumers(&self) -> Result<()> {
-        Self::ensure_consumer_group_exists(&self.client).await?;
-
         let consumers: Vec<ConsumerInfo> =
             self.client.xinfo_consumers(STREAM_NAME, GROUP_NAME).await?;
 
@@ -200,8 +195,6 @@ impl MessageConsumer {
     // try not to crash, and have this function which claims any pending messages that have hit
     // MAX_MESSAGE_PROCESS_DURATION_MS. A message getting processed twice is fine.
     pub async fn consume_pending_messages(&self) -> Result<()> {
-        Self::ensure_consumer_group_exists(&self.client).await?;
-
         // Redis scans a finite number of pending messages and provides us with an ID to continue
         // in case there were more messages pending than we claimed.
         let mut autoclaim_id: String = "0-0".to_string();
