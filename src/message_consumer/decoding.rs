@@ -75,13 +75,27 @@ impl FromRedis for XAutoClaimResponse {
             .next()
             .expect("expected message at index 1")
             .into_array();
-        // Sometimes this is an array of NILs, unclear why. We deal with it by skipping them. This
-        // may be because messages are pending, but their data has already been dropped by Redis.
+
+        // Messages which are consumed move into the consumer's pending entries list. In rare cases
+        // a message on this list is never acknowledged. The consumer may be terminated or crash
+        // before it can. Normally this message would be re-delivered to another consumer, in even
+        // more rare cases, the message gets deleted before any consumer can.
+        //
+        // In Redis v6, these messages end up being returned as nil. We skip them, but this
+        // means they forever rotate between consumers that fail to acknowledge them. To fix this,
+        // Redis v6 would need a more elaborate flow where we use XPENDING to figure out what IDs
+        // we'd like to claim, and then use XCLAIM to claim them, then ack any which come back nil.
+        // See also: https://github.com/redis/redis/pull/10227. One can use XPENDING to find out
+        // which IDs to claim, try to claim them with XCLAIM, and when discovering they are nil,
+        // ack them.
+        //
+        // In Redis v7, these messages are automatically deleted from the pending entries list and
+        // their IDs are returned as a third value.
         let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
         for message in messages {
             match message {
                 RedisValue::Null => {
-                    debug!("nil message in XAUTOCLAIM response, skipping");
+                    debug!("received nil message in XAUTOCLAIM response, skipping");
                     continue;
                 }
                 message => {
@@ -96,6 +110,7 @@ impl FromRedis for XAutoClaimResponse {
                 }
             }
         }
+
         Ok(Self(next_autoclaim_id, id_archive_entry_pairs))
     }
 }

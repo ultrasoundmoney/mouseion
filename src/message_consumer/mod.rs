@@ -1,4 +1,10 @@
 //! Pulls new messages from Redis and sends them to the archiver.
+//!
+//! ## Technical Notes
+//! - The consumer is built for Redis v7, it works with Redis v6 but encounters a subtle issue
+//! where pending entries lists become bloated with deleted message IDs under heavy load. Further
+//! details for how to implement v6 support can be found in the decoding module. Happy to support
+//! and merge any implementation.
 mod decoding;
 
 use std::{fmt::Debug, sync::Arc};
