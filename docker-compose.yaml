@@ -1,17 +1,26 @@
 version: "3.8"
 services:
-  nats:
-    image: nats:latest
-    command: -js
+  redis:
+    image: redis
     ports:
-      - 4222:4222
+      - 6379:6379
 
   block-submission-archiver:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
-      - NATS_URI=nats://nats:4222
-      - RUST_LOG=debug,async_nats=warn
+      - REDIS_URI=redis://redis:6793
+      - RUST_LOG=block-submission-archiver=debug
     depends_on:
-      - nats
+      - redis
+
+  sim-messages:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URI=redis://redis:6793
+      - RUST_LOG=sim-messages=debug
+    depends_on:
+      - redis
