@@ -37,7 +37,7 @@ use tokio::{
     sync::{mpsc, Notify},
     try_join,
 };
-use tracing::{debug, info, Level};
+use tracing::{info, Level};
 
 use crate::{archiver::Archiver, message_consumer::MessageConsumer};
 
@@ -95,10 +95,8 @@ async fn main() -> Result<()> {
         archive_entries_tx,
     ));
 
-    debug!("ensuring a consumer group exists");
     message_consumer.ensure_consumer_group_exists().await?;
 
-    debug!("deleting dead consumers");
     message_consumer.delete_dead_consumers().await?;
 
     let pull_new_messages_thread = tokio::spawn({

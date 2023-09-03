@@ -18,7 +18,7 @@ use tokio::{
     select,
     sync::{mpsc, Notify},
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, instrument, trace};
 
 use crate::{health::MessageConsumerHealth, GROUP_NAME, MESSAGE_BATCH_SIZE};
 
@@ -72,6 +72,7 @@ impl MessageConsumer {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn ensure_consumer_group_exists(&self) -> Result<()> {
         // If no consumer group exists, create one, if it already exists, we'll get an error we can
         // ignore.
@@ -154,6 +155,7 @@ impl MessageConsumer {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn delete_dead_consumers(&self) -> Result<()> {
         let consumers: Vec<ConsumerInfo> =
             self.client.xinfo_consumers(STREAM_NAME, GROUP_NAME).await?;
