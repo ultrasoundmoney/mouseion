@@ -53,7 +53,7 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    log::init_with_env();
+    log::init();
 
     info!("starting block submission archiver");
 

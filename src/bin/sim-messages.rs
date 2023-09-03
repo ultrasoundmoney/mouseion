@@ -96,7 +96,7 @@ const STATE_ROOTS: [&str; 55] = [
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    log::init_with_env();
+    log::init();
 
     info!("publishing simulation messages");
 

@@ -1,38 +1,16 @@
-use lazy_static::lazy_static;
-use tracing::Subscriber;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::EnvFilter;
 
-use crate::env::{self, Env, ENV_CONFIG};
+use crate::env::{Env, ENV_CONFIG};
 
-lazy_static! {
-    static ref PRETTY_PRINT: bool = env::get_env_bool("PRETTY_PRINT");
-}
-
-pub fn init_with_env() {
-    let env_filter = EnvFilter::from_default_env();
-
-    let subscriber: Box<dyn Subscriber + Send + Sync> = if ENV_CONFIG.pretty_print {
-        Box::new(
-            fmt::Subscriber::builder()
-                .with_env_filter(env_filter)
-                .finish(),
-        )
+pub fn init() {
+    if ENV_CONFIG.env == Env::Dev {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
     } else {
-        match ENV_CONFIG.env {
-            Env::Dev => Box::new(
-                fmt::Subscriber::builder()
-                    .with_env_filter(env_filter)
-                    .finish(),
-            ),
-            Env::Stag | Env::Prod => Box::new(
-                fmt::Subscriber::builder()
-                    .json()
-                    .with_env_filter(env_filter)
-                    .finish(),
-            ),
-        }
-    };
-
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("expect to be able to set global default subscriber");
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .json()
+            .init();
+    }
 }
