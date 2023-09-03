@@ -22,9 +22,9 @@ lazy_static! {
             Network::Goerli => "2021-03-23T14:00:00Z".parse().unwrap()
         }
     };
-    // We can't know whether a builder will submit a payload for a slot late. Although builders
+    // We can't know whether a builder will submit a block submission for a slot late. Although builders
     // should submit bids well before t+2 of a slot, proposers may be late. We allow a maximum t+12
-    // seconds, _plus_ a buffer just to be extra sure we've received all payloads. The value below
+    // seconds, _plus_ a buffer just to be extra sure we've received all block submission. The value below
     // is the duration of that buffer.
     static ref OLD_SLOT_BUFFER_DURATION: chrono::Duration = chrono::Duration::seconds(24);
 }

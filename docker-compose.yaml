@@ -6,7 +6,7 @@ services:
     ports:
       - 4222:4222
 
-  payload-archiver:
+  block-submission-archiver:
     build:
       context: .
       dockerfile: Dockerfile

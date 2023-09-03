@@ -45,8 +45,8 @@ pub fn get_env_var_unsafe(key: &str) -> String {
     get_env_var(key).unwrap_or_else(|| panic!("{key} should be in env"))
 }
 
-/// Some things are different between environments. Urls we contact, timeouts we use, data we have.
-/// This enum is the main way to create these branches in our logic.
+/// Some things do not need to be configurable explicitly but do differ between environments. This
+/// enum helps create those distinctions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Env {
     Dev,

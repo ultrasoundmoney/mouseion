@@ -1,9 +1,9 @@
 use anyhow::Result;
+use block_submission_archiver::env::ENV_CONFIG;
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
-use payload_archiver::env::ENV_CONFIG;
 use tracing::info;
 
-use crate::env::{self, EnvConfig};
+use crate::env::EnvConfig;
 
 fn build_local_file_store() -> Result<LocalFileSystem> {
     let object_store = LocalFileSystem::new_with_prefix("/tmp/")?;

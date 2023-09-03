@@ -1,5 +1,5 @@
-//! # Payload Archiver
-//! Takes the many execution payloads that the relay receives, over a message queue, bundles them
+//! # Block Submission Archiver
+//! Takes the many block submissions that the relay receives, over a message queue, bundles them
 //! by slot, and stores them in cheap Object Storage.
 //!
 //! ## Architecture
@@ -24,15 +24,15 @@ mod trace_memory;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use block_submission_archiver::{
+    env::{self, ENV_CONFIG},
+    log,
+};
 use fred::{
     prelude::{ClientLike, RedisClient},
     types::RedisConfig,
 };
 use health::{MessageConsumerHealth, RedisHealth};
-use payload_archiver::{
-    env::{self, ENV_CONFIG},
-    log,
-};
 use tokio::{
     sync::{mpsc, Notify},
     try_join,
@@ -55,7 +55,7 @@ pub struct AppState {
 async fn main() -> Result<()> {
     log::init_with_env();
 
-    info!("starting payload archiver");
+    info!("starting block submission archiver");
 
     let shutdown_notify = Arc::new(Notify::new());
 

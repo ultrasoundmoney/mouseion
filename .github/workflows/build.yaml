@@ -33,7 +33,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ultrasoundorg/payload-archiver:${{ env.SHORT_SHA }}
-            ultrasoundorg/payload-archiver:latest
+            ultrasoundorg/block-submission-archiver:${{ env.SHORT_SHA }}
+            ultrasoundorg/block-submission-archiver:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

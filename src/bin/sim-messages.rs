@@ -4,12 +4,12 @@ use std::{
 };
 
 use anyhow::Result;
+use block_submission_archiver::{env::ENV_CONFIG, log, ArchiveEntry, STREAM_NAME};
 use flate2::read::GzDecoder;
 use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
     types::RedisConfig,
 };
-use payload_archiver::{env::ENV_CONFIG, log, ArchiveEntry, STREAM_NAME};
 use tracing::{debug, info};
 
 fn decompress_gz_to_file(input_path: &str, output_path: &str) -> Result<(), std::io::Error> {
@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
 
     let input_paths = STATE_ROOTS
         .iter()
-        .map(|state_root| format!("example_payloads/{}.json.gz", state_root));
+        .map(|state_root| format!("example_block_submissions/{}.json.gz", state_root));
 
     let inputs = STATE_ROOTS.iter().zip(input_paths);
 
@@ -119,8 +119,8 @@ async fn main() -> Result<()> {
             decompress_gz_to_file(&input_path, decompressed_path)?;
         }
 
-        let raw_payload = read_file(decompressed_path)?;
-        let archive_entry: ArchiveEntry = serde_json::from_str(&raw_payload)?;
+        let raw_block_submission = read_file(decompressed_path)?;
+        let archive_entry: ArchiveEntry = serde_json::from_str(&raw_block_submission)?;
 
         client
             .xadd(STREAM_NAME, false, None, "*", archive_entry)

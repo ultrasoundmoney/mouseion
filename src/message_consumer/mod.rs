@@ -10,10 +10,10 @@ mod decoding;
 use std::{fmt::Debug, sync::Arc};
 
 use anyhow::{bail, Result};
+use block_submission_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
 use fred::prelude::{RedisClient, RedisResult, StreamsInterface};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
-use payload_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
 use tokio::{
     select,
     sync::{mpsc, Notify},

@@ -1,9 +1,9 @@
 //! Decoding of Redis responses into Rust types.
+use block_submission_archiver::{ArchiveEntry, STREAM_NAME};
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
     types::{FromRedis, RedisKey, RedisValue},
 };
-use payload_archiver::{ArchiveEntry, STREAM_NAME};
 use tracing::{debug, trace};
 
 use super::IdArchiveEntryPair;

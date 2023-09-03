@@ -1,11 +1,11 @@
 [package]
-name = "payload-archiver"
+name = "block-submission-archiver"
 version = "2.1.0"
 edition = "2021"
-default-run = "payload-archiver"
+default-run = "block-submission-archiver"
 
 [[bin]]
-name = "payload-archiver"
+name = "block-submission-archiver"
 path = "src/main.rs"
 
 [dependencies]

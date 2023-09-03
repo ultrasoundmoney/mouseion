@@ -1,6 +1,6 @@
 use anyhow::Context;
 use axum::{routing::get, Router, Server};
-use payload_archiver::env::{Env, ENV_CONFIG};
+use block_submission_archiver::env::{Env, ENV_CONFIG};
 use tokio::sync::Notify;
 use tracing::{error, info};
 
