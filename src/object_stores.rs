@@ -1,23 +1,9 @@
 use anyhow::Result;
-use object_store::{
-    aws::{AmazonS3, AmazonS3Builder},
-    local::LocalFileSystem,
-    ObjectStore,
-};
+use object_store::{aws::AmazonS3Builder, local::LocalFileSystem, ObjectStore};
+use payload_archiver::env::ENV_CONFIG;
 use tracing::info;
 
-use crate::env::{self, Env, EnvConfig};
-
-fn build_ovh_store(bucket_name: &str) -> Result<AmazonS3> {
-    let object_store = AmazonS3Builder::new()
-        .with_endpoint("https://s3.gra.perf.cloud.ovh.net/")
-        .with_region("gra")
-        .with_bucket_name(bucket_name)
-        .with_secret_access_key(env::get_env_var_unsafe("S3_SECRET_ACCESS_KEY"))
-        .with_access_key_id("3a7f56c872164eeb9ea200823ad7b403")
-        .build()?;
-    Ok(object_store)
-}
+use crate::env::{self, EnvConfig};
 
 fn build_local_file_store() -> Result<LocalFileSystem> {
     let object_store = LocalFileSystem::new_with_prefix("/tmp/")?;
@@ -30,14 +16,15 @@ pub fn build_env_based_store(env_config: &EnvConfig) -> Result<Box<dyn ObjectSto
         return Ok(Box::new(build_local_file_store()?));
     }
 
-    let bucket_name = {
-        match env_config.env {
-            Env::Prod => "block-submission-archive-prod",
-            Env::Stag => "block-submission-archive-stag",
-            Env::Dev => "block-submission-archive-dev",
-        }
-    };
+    let s3_bucket = &ENV_CONFIG.s3_bucket;
+    let s3_store = AmazonS3Builder::from_env()
+        .with_bucket_name(s3_bucket)
+        .build()?;
 
-    info!(bucket_name, "using OVH store");
-    Ok(Box::new(build_ovh_store(bucket_name)?))
+    // We can't read directly from the s3_store so mimic what it does. No need to blow up if we
+    // fail.
+    let endpoint = std::env::var("AWS_ENDPOINT").unwrap_or("UNKNOWN".to_string());
+    info!(endpoint, s3_bucket, "using S3 store");
+
+    Ok(Box::new(s3_store))
 }

@@ -108,7 +108,7 @@ pub struct EnvConfig {
     pub pod_name: Option<String>,
     pub pretty_print: bool,
     pub redis_uri: String,
-    pub s3_secret_access_key: String,
+    pub s3_bucket: String,
     pub use_local_store: bool,
 }
 
@@ -120,7 +120,7 @@ fn get_env_config() -> EnvConfig {
         pod_name: get_env_var("POD_NAME"),
         pretty_print: get_env_bool("PRETTY_PRINT"),
         redis_uri: get_env_var_unsafe("REDIS_URI"),
-        s3_secret_access_key: get_env_var_unsafe("S3_SECRET_ACCESS_KEY"),
+        s3_bucket: get_env_var("S3_BUCKET").unwrap_or("block-submission-archive-dev".to_string()),
         use_local_store: get_env_bool("USE_LOCAL_STORE"),
     }
 }
