@@ -137,7 +137,7 @@ impl MessageConsumer {
     }
 
     pub async fn run_consume_new_messages(&self) {
-        debug!("pulling new messages");
+        debug!(consumer_id = *CONSUMER_ID, "pulling new messages");
         select! {
             _ = self.shutdown_notify.notified() => {
                 info!("pulling new messages thread shutting down");
@@ -239,7 +239,7 @@ impl MessageConsumer {
     }
 
     pub async fn run_consume_pending_messages(&self) {
-        debug!("claiming pending messages");
+        debug!(consumer_id = *CONSUMER_ID, "claiming pending messages");
         select! {
                 _ = self.shutdown_notify.notified() => {
                     debug!("shutting down claim pending messages thread");
