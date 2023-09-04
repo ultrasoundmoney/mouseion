@@ -102,14 +102,14 @@ async fn main() -> Result<()> {
         async move { message_consumer.run_consume_new_messages().await }
     });
 
-    // let pull_pending_messages_thread = tokio::spawn({
-    //     let message_consumer = message_consumer.clone();
-    //     async move {
-    //         message_consumer.run_consume_pending_messages().await;
-    //     }
-    // });
+    let pull_pending_messages_thread = tokio::spawn({
+        let message_consumer = message_consumer.clone();
+        async move {
+            message_consumer.run_consume_pending_messages().await;
+        }
+    });
 
-    let mut message_archiver = Archiver::new(
+    let message_archiver = Archiver::new(
         redis_client.clone(),
         archive_entries_rx,
         object_store,
@@ -136,7 +136,7 @@ async fn main() -> Result<()> {
 
     try_join!(
         pull_new_messages_thread,
-        // pull_pending_messages_thread,
+        pull_pending_messages_thread,
         process_messages_thread,
         server_thread,
     )?;
