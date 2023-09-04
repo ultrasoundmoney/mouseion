@@ -70,9 +70,7 @@ async fn main() -> Result<()> {
         });
     }
 
-    let env_config = &env::ENV_CONFIG;
-
-    let object_store = object_stores::build_env_based_store(env_config)?;
+    let object_store = object_stores::build_env_based_store()?;
 
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     let redis_client = RedisClient::new(config, None, None);
