@@ -1,3 +1,4 @@
+# vim: set ft=dockerfile:
 FROM rust as builder
 WORKDIR /app
 
@@ -10,12 +11,11 @@ RUN sed -i 's#src/main.rs#dummy.rs#' Cargo.toml
 RUN cargo build --release --bin block-submission-archiver
 
 # Build executable.
-RUN sed -i 's#dummy.rs#src/main.rs#' Cargo.toml
 COPY src ./src
-RUN cargo build --release --bin block-submission-archiver
+RUN cargo build --release --bin block-submission-simulator
 
 # Build runtime image.
 FROM gcr.io/distroless/cc-debian12 AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/block-submission-archiver /app/block-submission-archiver
-ENTRYPOINT ["/app/block-submission-archiver"]
+COPY --from=builder /app/target/release/block-submission-simulator /app/block-submission-simulator
+ENTRYPOINT ["/app/block-submission-simulator"]
