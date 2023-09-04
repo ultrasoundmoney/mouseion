@@ -15,7 +15,7 @@ services:
     depends_on:
       - redis
 
-  sim-messages:
+  simulator:
     build:
       context: .
       dockerfile: Dockerfile

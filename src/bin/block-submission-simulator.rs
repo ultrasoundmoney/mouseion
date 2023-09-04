@@ -98,7 +98,7 @@ const STATE_ROOTS: [&str; 55] = [
 async fn main() -> Result<()> {
     log::init();
 
-    info!("publishing simulation messages");
+    info!("simulating block submissions");
 
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     let client = RedisClient::new(config, None, None);
@@ -127,10 +127,10 @@ async fn main() -> Result<()> {
             .xadd(STREAM_NAME, false, None, "*", archive_entry)
             .await?;
 
-        debug!(%state_root, "published simulation message");
+        debug!(%state_root, "simulated block submission");
     }
 
-    info!("done publishing simulation messages");
+    info!("done simulating block submissions");
 
     Ok(())
 }
