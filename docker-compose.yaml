@@ -15,6 +15,7 @@ services:
       - AWS_ENDPOINT=https://s3.gra.perf.cloud.ovh.net/
       - AWS_SECRET_ACCESS_KEY
       - ENV=dev
+      - NETWORK=mainnet
       - REDIS_URI=redis://redis:6379
       - RUST_LOG=block_submission_archiver=debug
       - S3_BUCKET=block-submission-archive-dev
