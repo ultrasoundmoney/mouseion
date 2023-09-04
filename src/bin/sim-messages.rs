@@ -103,6 +103,7 @@ async fn main() -> Result<()> {
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     let client = RedisClient::new(config, None, None);
     client.connect();
+    client.wait_for_connect().await?;
 
     let input_paths = STATE_ROOTS
         .iter()
