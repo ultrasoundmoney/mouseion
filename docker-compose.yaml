@@ -5,22 +5,33 @@ services:
     ports:
       - 6379:6379
 
-  block-submission-archiver:
+  archiver:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
-      - REDIS_URI=redis://redis:6793
-      - RUST_LOG=block-submission-archiver=debug
+      - AWS_ACCESS_KEY_ID=3a7f56c872164eeb9ea200823ad7b403
+      - AWS_DEFAULT_REGION=GRA
+      - AWS_ENDPOINT=https://s3.gra.perf.cloud.ovh.net/
+      - AWS_SECRET_ACCESS_KEY
+      - ENV=dev
+      - REDIS_URI=redis://redis:6379
+      - RUST_LOG=block_submission_archiver=debug
+      - S3_BUCKET=block-submission-archive-dev
+      - USE_LOCAL_STORE=false
     depends_on:
       - redis
 
   simulator:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.sim
+    command: ["/app/sim-messages"]
     environment:
-      - REDIS_URI=redis://redis:6793
-      - RUST_LOG=sim-messages=debug
+      - ENV=dev
+      - REDIS_URI=redis://redis:6379
+      - RUST_LOG=block_submission_simulator=debug
     depends_on:
       - redis
+    volumes:
+      - ./example_block_submissions:/app/example_block_submissions
