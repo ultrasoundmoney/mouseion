@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fred::prelude::RedisClient;
-use futures::{channel::mpsc::Receiver, StreamExt, TryStreamExt};
+use futures::{channel::mpsc::Receiver, select, FutureExt, StreamExt, TryStreamExt};
 use object_store::ObjectStore;
-use tokio::{select, sync::Notify};
+use tokio::sync::Notify;
 use tracing::{debug, error, info};
 
 use crate::{message_consumer::IdArchiveEntryPair, performance::TimedExt};
@@ -60,10 +60,10 @@ impl<OS: ObjectStore> Archiver<OS> {
         debug!("archiving received IdArchiveEntryPairs");
         let shutdown_notify = self.shutdown_notify.clone();
         select! {
-            _ = shutdown_notify.notified() => {
+            _ = shutdown_notify.notified().fuse() => {
                 debug!("shutting down process messages thread");
             }
-            result = self.archive_entries(archive_entries_rx) => {
+            result = self.archive_entries(archive_entries_rx).fuse() => {
                 match result {
                     Ok(_) => info!("stopped processing messages"),
                     Err(e) => {

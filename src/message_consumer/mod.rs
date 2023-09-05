@@ -12,13 +12,10 @@ use std::{fmt::Debug, sync::Arc};
 use anyhow::{bail, Result};
 use block_submission_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
 use fred::prelude::{RedisClient, RedisResult, StreamsInterface};
-use futures::{channel::mpsc::Sender, SinkExt};
+use futures::{channel::mpsc::Sender, lock::Mutex, select, FutureExt, SinkExt};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
-use tokio::{
-    select,
-    sync::{Mutex, Notify},
-};
+use tokio::sync::Notify;
 use tracing::{debug, error, info, instrument, trace};
 
 use crate::{health::MessageConsumerHealth, GROUP_NAME, MESSAGE_BATCH_SIZE};
@@ -144,10 +141,10 @@ impl MessageConsumer {
     pub async fn run_consume_new_messages(&self) {
         debug!(consumer_id = *CONSUMER_ID, "pulling new messages");
         select! {
-            _ = self.shutdown_notify.notified() => {
+            _ = self.shutdown_notify.notified().fuse() => {
                 info!("pulling new messages thread shutting down");
             }
-            result = self.retrieve_new_messages() => {
+            result = self.retrieve_new_messages().fuse() => {
                 match result {
                     Ok(_) => info!("stopped pulling new messages"),
                     Err(e) => {
@@ -246,10 +243,10 @@ impl MessageConsumer {
     pub async fn run_consume_pending_messages(&self) {
         debug!(consumer_id = *CONSUMER_ID, "claiming pending messages");
         select! {
-                _ = self.shutdown_notify.notified() => {
+                _ = self.shutdown_notify.notified().fuse() => {
                     debug!("shutting down claim pending messages thread");
                 }
-                result = self.consume_pending_messages() => {
+                result = self.consume_pending_messages().fuse() => {
                     match result {
                         Ok(_) => info!("stopped pulling pending messages"),
                         Err(e) => {
