@@ -217,17 +217,19 @@ impl MessageConsumer {
                 )
                 .await?;
 
-            debug!(
-                autoclaim_id,
-                count = id_archive_entry_pairs.len(),
-                "claimed pending messages"
-            );
+            if !id_archive_entry_pairs.is_empty() {
+                debug!(
+                    autoclaim_id,
+                    count = id_archive_entry_pairs.len(),
+                    "claimed pending messages"
+                );
+
+                for message in id_archive_entry_pairs {
+                    self.archive_entries_tx.lock().await.send(message).await?;
+                }
+            }
 
             autoclaim_id = next_autoclaim_id;
-
-            for message in id_archive_entry_pairs {
-                self.archive_entries_tx.lock().await.send(message).await?;
-            }
 
             if autoclaim_id == "0-0" {
                 // No messages pending, sleep to avoid polling constantly.
