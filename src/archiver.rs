@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use backoff::{future::retry, Error, ExponentialBackoffBuilder};
 use fred::prelude::RedisClient;
 use futures::{channel::mpsc::Receiver, select, FutureExt, StreamExt, TryStreamExt};
+use lazy_static::lazy_static;
 use object_store::ObjectStore;
 use tokio::sync::Notify;
 use tracing::{debug, error, info};
@@ -10,6 +12,9 @@ use tracing::{debug, error, info};
 use crate::{message_consumer::IdArchiveEntryPair, performance::TimedExt};
 
 const MAX_CONCURRENCY: usize = 4;
+lazy_static! {
+    static ref MAX_RETRY_DURATION_MS: Duration = Duration::from_secs(8);
+}
 
 pub struct Archiver<OS: ObjectStore> {
     client: RedisClient,
@@ -26,12 +31,46 @@ impl<OS: ObjectStore> Archiver<OS> {
         }
     }
 
-    async fn archive_entry(&self, id_archive_entry_pair: IdArchiveEntryPair) -> Result<()> {
+    async fn store_with_backoff(
+        &self,
+        id_archive_entry_pair: &IdArchiveEntryPair,
+        json_gz_bytes: bytes::Bytes,
+    ) -> Result<()> {
+        let backoff_config = ExponentialBackoffBuilder::default()
+            .with_max_elapsed_time(Some(*MAX_RETRY_DURATION_MS))
+            .build();
+        retry(backoff_config, || async {
+            self.object_store
+                .put(
+                    &id_archive_entry_pair.entry.bundle_path(),
+                    json_gz_bytes.clone(),
+                )
+                .await
+                .map_err(|e| {
+                    // object_store offers retrying itself but does not retry on 409 Conflict.
+                    // However we want, and even the error itself, suggests to retry it.
+                    if e.to_string().contains("409 Conflict") {
+                        debug!("retrying after 409 Conflict");
+                        Error::Transient {
+                            err: e,
+                            retry_after: None,
+                        }
+                    } else {
+                        Error::Permanent(e)
+                    }
+                })
+        })
+        .await
+        .context("storing archive entry")?;
+
+        Ok(())
+    }
+
+    async fn archive_entry(&self, id_archive_entry_pair: &IdArchiveEntryPair) -> Result<()> {
         let json_gz_bytes = id_archive_entry_pair.entry.compress().await?;
 
-        self.object_store
-            .put(&id_archive_entry_pair.entry.bundle_path(), json_gz_bytes)
-            .timed("object_store_put")
+        self.store_with_backoff(&id_archive_entry_pair, json_gz_bytes)
+            .timed("store_with_backoff")
             .await?;
 
         id_archive_entry_pair
@@ -49,7 +88,7 @@ impl<OS: ObjectStore> Archiver<OS> {
         archive_entries_rx
             .map(Ok)
             .try_for_each_concurrent(MAX_CONCURRENCY, |id_archive_entry_pair| async move {
-                self.archive_entry(id_archive_entry_pair).await
+                self.archive_entry(&id_archive_entry_pair).await
             })
             .await?;
 

@@ -3,7 +3,7 @@ use block_submission_archiver::env::ENV_CONFIG;
 use object_store::{
     aws::{AmazonS3, AmazonS3Builder},
     local::LocalFileSystem,
-    ObjectStore, RetryConfig,
+    ObjectStore,
 };
 use tracing::info;
 
@@ -16,7 +16,10 @@ fn build_s3_store() -> Result<AmazonS3> {
     let s3_bucket = &ENV_CONFIG.s3_bucket;
     let s3_store = AmazonS3Builder::from_env()
         .with_bucket_name(s3_bucket)
-        .with_retry(RetryConfig::default())
+        // The built-in retry does not handle 409 - conflict responses, although the error itself
+        // asks to retry. We need to handle this ourselves until it's fixed.
+        // See: https://github.com/apache/arrow-rs/issues/4777
+        // .with_retry(RetryConfig::default())
         .build()?;
     Ok(s3_store)
 }
