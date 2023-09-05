@@ -13,6 +13,10 @@
 //! The third channel should always be able to process pulled messages within
 //! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
 //! process it also. This is however no big deal, as the storage process is idempotent.
+//!
+//! ## Improvements
+//! Would be nice to catch the SIGTERM and finish putting the current message, perhaps even the
+//! full message buffer, before shutting down.
 mod archiver;
 mod health;
 mod message_consumer;
