@@ -69,7 +69,7 @@ impl<OS: ObjectStore> Archiver<OS> {
     async fn archive_entry(&self, id_archive_entry_pair: &IdArchiveEntryPair) -> Result<()> {
         let json_gz_bytes = id_archive_entry_pair.entry.compress().await?;
 
-        self.store(&id_archive_entry_pair, json_gz_bytes)
+        self.store(id_archive_entry_pair, json_gz_bytes)
             .timed("store_with_backoff")
             .await?;
 
