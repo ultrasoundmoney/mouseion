@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
-use backoff::{future::retry, Error, ExponentialBackoffBuilder};
+use anyhow::Result;
 use fred::prelude::RedisClient;
 use futures::{channel::mpsc::Receiver, select, FutureExt, StreamExt, TryStreamExt};
 use lazy_static::lazy_static;
@@ -31,45 +30,46 @@ impl<OS: ObjectStore> Archiver<OS> {
         }
     }
 
-    async fn store_with_backoff(
+    async fn store(
         &self,
         id_archive_entry_pair: &IdArchiveEntryPair,
         json_gz_bytes: bytes::Bytes,
     ) -> Result<()> {
-        let backoff_config = ExponentialBackoffBuilder::default()
-            .with_max_elapsed_time(Some(*MAX_RETRY_DURATION_MS))
-            .build();
-        retry(backoff_config, || async {
-            self.object_store
-                .put(
-                    &id_archive_entry_pair.entry.bundle_path(),
-                    json_gz_bytes.clone(),
-                )
-                .await
-                .map_err(|e| {
-                    // object_store offers retrying itself but does not retry on 409 Conflict.
-                    // However we want, and even the error itself, suggests to retry it.
-                    if e.to_string().contains("409 Conflict") {
-                        debug!("retrying after 409 Conflict");
-                        Error::Transient {
-                            err: e,
-                            retry_after: None,
-                        }
-                    } else {
-                        Error::Permanent(e)
-                    }
-                })
-        })
-        .await
-        .context("storing archive entry")?;
-
-        Ok(())
+        let result = self
+            .object_store
+            .put(
+                &id_archive_entry_pair.entry.bundle_path(),
+                json_gz_bytes.clone(),
+            )
+            .await;
+        match result {
+            Ok(_) => {
+                debug!(
+                    state_root = ?id_archive_entry_pair.entry.state_root(),
+                    "stored bundle",
+                );
+                Ok(())
+            }
+            Err(e) => {
+                // Sometimes archivers manage to grab and attempt to store the same message. As
+                // the operations are idempotent, we simply skip 409s.
+                if e.to_string().contains("409 Conflict") {
+                    debug!(
+                        state_root = ?id_archive_entry_pair.entry.state_root(),
+                        "hit 409 - conflict when storing bundle, ignoring"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
     async fn archive_entry(&self, id_archive_entry_pair: &IdArchiveEntryPair) -> Result<()> {
         let json_gz_bytes = id_archive_entry_pair.entry.compress().await?;
 
-        self.store_with_backoff(&id_archive_entry_pair, json_gz_bytes)
+        self.store(&id_archive_entry_pair, json_gz_bytes)
             .timed("store_with_backoff")
             .await?;
 
