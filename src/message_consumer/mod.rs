@@ -12,11 +12,12 @@ use std::{fmt::Debug, sync::Arc};
 use anyhow::{bail, Result};
 use block_submission_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
 use fred::prelude::{RedisClient, RedisResult, StreamsInterface};
+use futures::{channel::mpsc::Sender, SinkExt};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
 use tokio::{
     select,
-    sync::{mpsc, Notify},
+    sync::{Mutex, Notify},
 };
 use tracing::{debug, error, info, instrument, trace};
 
@@ -51,24 +52,24 @@ impl IdArchiveEntryPair {
 }
 
 pub struct MessageConsumer {
+    archive_entries_tx: Arc<Mutex<Sender<IdArchiveEntryPair>>>,
     client: RedisClient,
     message_health: MessageConsumerHealth,
     shutdown_notify: Arc<Notify>,
-    tx: mpsc::Sender<IdArchiveEntryPair>,
 }
 
 impl MessageConsumer {
     pub fn new(
+        archive_entries_tx: Sender<IdArchiveEntryPair>,
         client: RedisClient,
         message_health: MessageConsumerHealth,
         shutdown_notify: Arc<Notify>,
-        tx: mpsc::Sender<IdArchiveEntryPair>,
     ) -> Self {
         Self {
+            archive_entries_tx: Arc::new(Mutex::new(archive_entries_tx)),
             client,
             message_health,
             shutdown_notify,
-            tx,
         }
     }
 
@@ -129,7 +130,11 @@ impl MessageConsumer {
             );
 
             for id_archive_entry_pair in id_archive_entry_pairs {
-                self.tx.send(id_archive_entry_pair).await?;
+                self.archive_entries_tx
+                    .lock()
+                    .await
+                    .send(id_archive_entry_pair)
+                    .await?;
             }
 
             self.message_health.set_last_message_received_now();
@@ -202,7 +207,7 @@ impl MessageConsumer {
         let mut autoclaim_id: String = "0-0".to_string();
 
         loop {
-            let XAutoClaimResponse(next_autoclaim_id, messages) = self
+            let XAutoClaimResponse(next_autoclaim_id, id_archive_entry_pairs) = self
                 .client
                 .xautoclaim(
                     STREAM_NAME,
@@ -217,14 +222,14 @@ impl MessageConsumer {
 
             debug!(
                 autoclaim_id,
-                count = messages.len(),
+                count = id_archive_entry_pairs.len(),
                 "claimed pending messages"
             );
 
             autoclaim_id = next_autoclaim_id;
 
-            for id_archive_entry_pair in messages {
-                self.tx.send(id_archive_entry_pair).await?;
+            for message in id_archive_entry_pairs {
+                self.archive_entries_tx.lock().await.send(message).await?;
             }
 
             if autoclaim_id == "0-0" {

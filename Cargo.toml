@@ -30,7 +30,6 @@ tokio = { version = "1.32.0", features = [
 	"sync",
 	"time",
 ] }
-tokio-stream = "0.1.14"
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", default-features = true, features = [
 	"env-filter",

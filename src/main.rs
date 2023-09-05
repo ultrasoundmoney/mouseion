@@ -32,11 +32,9 @@ use fred::{
     prelude::{ClientLike, RedisClient},
     types::RedisConfig,
 };
+use futures::channel::mpsc;
 use health::{MessageConsumerHealth, RedisHealth};
-use tokio::{
-    sync::{mpsc, Notify},
-    try_join,
-};
+use tokio::{sync::Notify, try_join};
 use tracing::{info, Level};
 
 use crate::{archiver::Archiver, message_consumer::MessageConsumer};
@@ -87,10 +85,10 @@ async fn main() -> Result<()> {
         mpsc::channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
 
     let message_consumer = Arc::new(MessageConsumer::new(
+        archive_entries_tx,
         redis_client.clone(),
         message_health.clone(),
         shutdown_notify.clone(),
-        archive_entries_tx,
     ));
 
     message_consumer.ensure_consumer_group_exists().await?;
@@ -109,16 +107,14 @@ async fn main() -> Result<()> {
         }
     });
 
-    let message_archiver = Archiver::new(
-        redis_client.clone(),
-        archive_entries_rx,
-        object_store,
-        shutdown_notify.clone(),
-    );
+    let message_archiver =
+        Archiver::new(redis_client.clone(), object_store, shutdown_notify.clone());
 
     let process_messages_thread = tokio::spawn({
         async move {
-            message_archiver.run_archive_entries().await;
+            message_archiver
+                .run_archive_entries(archive_entries_rx)
+                .await;
         }
     });
 
