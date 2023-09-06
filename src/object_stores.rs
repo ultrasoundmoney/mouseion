@@ -16,10 +16,6 @@ fn build_s3_store() -> Result<AmazonS3> {
     let s3_bucket = &ENV_CONFIG.s3_bucket;
     let s3_store = AmazonS3Builder::from_env()
         .with_bucket_name(s3_bucket)
-        // The built-in retry does not handle 409 - conflict responses, although the error itself
-        // asks to retry. We need to handle this ourselves until it's fixed.
-        // See: https://github.com/apache/arrow-rs/issues/4777
-        // .with_retry(RetryConfig::default())
         .build()?;
     Ok(s3_store)
 }
