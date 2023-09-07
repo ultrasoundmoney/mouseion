@@ -27,7 +27,7 @@ pub struct BlockSubmission {
 impl std::fmt::Debug for BlockSubmission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state_root = self.state_root();
-        f.debug_struct("ArchiveEntry")
+        f.debug_struct("BlockSubmission")
             .field("eligible_at", &self.eligible_at)
             .field("payload", &format!("<PAYLOAD_JSON:{state_root}>"))
             .field("received_at", &self.received_at)

@@ -33,7 +33,7 @@ lazy_static! {
     static ref PULL_PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 }
 
-pub type IdArchiveEntry = (String, BlockSubmission);
+pub type IdBlockSubmissionPairs = (String, BlockSubmission);
 
 #[derive(Clone)]
 pub struct RedisConsumer {
@@ -156,7 +156,7 @@ impl RedisConsumer {
     // we'd still have the same problem when scaling down the number of active consumers. Instead, we
     // try not to crash, and have this function which claims any pending messages that have hit
     // MAX_MESSAGE_PROCESS_DURATION_MS. A message getting processed twice is fine.
-    async fn pull_pending_submissions(&mut self) -> Result<Vec<IdArchiveEntry>> {
+    async fn pull_pending_submissions(&mut self) -> Result<Vec<IdBlockSubmissionPairs>> {
         let XAutoClaimResponse(next_autoclaim_id, id_archive_entry_pairs) = self
             .client
             .xautoclaim(
@@ -185,7 +185,7 @@ impl RedisConsumer {
         }
     }
 
-    pub async fn pull_id_block_submission_pairs(&mut self) -> Result<Vec<IdArchiveEntry>> {
+    pub async fn pull_id_block_submission_pairs(&mut self) -> Result<Vec<IdBlockSubmissionPairs>> {
         let new_messages = self.pull_new_submissions().await?;
         let pending_messages = self.pull_pending_submissions().await?;
         Ok(new_messages.into_iter().chain(pending_messages).collect())

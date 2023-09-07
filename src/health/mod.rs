@@ -19,7 +19,8 @@ pub async fn get_livez(State(state): State<AppState>) -> impl IntoResponse {
     // We check but don't count message health. Messages should be continuously coming in on
     // production. Until we know whether that is reliable we don't want to fail the health
     // check.
-    let (_is_messages_healthy, messages_health_status) = state.message_health.health_status();
+    let (_is_messages_healthy, messages_health_status) =
+        state.redis_consumer_health.health_status();
 
     let message = json!({ "nats": nats_health_status, "messages": messages_health_status });
 

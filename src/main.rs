@@ -6,8 +6,8 @@
 //! The archiver is composed of three main components:
 //! - A component which pulls in new messages and parses them.
 //! - A component which claims pending messages and parses them.
-//! - A component which takes parsed IdArchiveEntryPairs and compresses their archive entry.
-//! - A component which takes the compressed IdArchiveEntryPairs and stores them in object storage.
+//! - A component which takes parsed IdBlockSubmissionPairs and compresses their archive entry.
+//! - A component which takes the compressed IdBlockSubmissionPairs and stores them in object storage.
 //! - A component which acknowledges messages which have been successfully stored.
 //!
 //! The full process should always be able to complete pulled messages within
@@ -18,7 +18,6 @@ mod object_stores;
 mod performance;
 mod redis_consumer;
 mod server;
-mod trace_memory;
 
 use std::sync::Arc;
 
@@ -31,36 +30,37 @@ use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
     types::RedisConfig,
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{
+    channel::mpsc::{self},
+    SinkExt, Stream, StreamExt, TryStreamExt,
+};
 use health::{RedisConsumerHealth, RedisHealth};
 use object_store::ObjectStore;
+use redis_consumer::IdBlockSubmissionPairs;
 use tokio::{sync::Notify, try_join};
-use tracing::{info, Level};
+use tracing::{error, info};
 
 use crate::redis_consumer::RedisConsumer;
 
 const GROUP_NAME: &str = "default-group";
-const ARCHIVING_MAX_CONCURRENCY: usize = 8;
+const ARCHIVING_MAX_CONCURRENCY: usize = 32;
 
 #[derive(Clone)]
 pub struct AppState {
-    message_health: RedisConsumerHealth,
+    redis_consumer_health: RedisConsumerHealth,
     redis_health: RedisHealth,
 }
 
 async fn archive_block_submissions(
-    message_consumer: &mut RedisConsumer,
     object_store: &impl ObjectStore,
     redis_client: &RedisClient,
+    submissions_stream: impl Stream<Item = IdBlockSubmissionPairs>,
 ) -> Result<()> {
-    let id_block_submission_pairs = message_consumer.pull_id_block_submission_pairs().await?;
-
-    let stream = futures::stream::iter(id_block_submission_pairs);
-    stream
+    submissions_stream
         .map(Ok)
         .try_for_each_concurrent(
             ARCHIVING_MAX_CONCURRENCY,
-            |(id, block_submission)| async move {
+            |(id, block_submission): IdBlockSubmissionPairs| async move {
                 let json_gz_bytes = block_submission.compress().await?;
 
                 object_store
@@ -94,24 +94,38 @@ async fn main() -> Result<()> {
         .context("failed to connect to Redis")?;
 
     let redis_health = RedisHealth::new(redis_client.clone());
-    let message_health = RedisConsumerHealth::new();
+    let redis_consumer_health = RedisConsumerHealth::new();
 
-    let mut message_consumer = RedisConsumer::new(redis_client.clone(), message_health.clone());
+    let mut redis_consumer =
+        RedisConsumer::new(redis_client.clone(), redis_consumer_health.clone());
 
-    message_consumer.ensure_consumer_group_exists().await?;
+    redis_consumer.ensure_consumer_group_exists().await?;
 
-    message_consumer.delete_dead_consumers().await?;
+    redis_consumer.delete_dead_consumers().await?;
 
-    let archive_thread = tokio::spawn({
+    const BLOCK_SUBMISSIONS_BUFFER_SIZE: usize = 32;
+
+    let (mut submissions_tx, submissions_rx) =
+        mpsc::channel::<IdBlockSubmissionPairs>(BLOCK_SUBMISSIONS_BUFFER_SIZE);
+
+    let submissions_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
             loop {
-                match archive_block_submissions(&mut message_consumer, &object_store, &redis_client)
+                let submissions = redis_consumer
+                    // This method blocks when Redis has no new messages available. No need to worry
+                    // about busy waiting.
+                    .pull_id_block_submission_pairs()
                     .await
-                {
-                    Ok(_) => {}
+                    .context("failed to pull block submissions");
+                match submissions {
+                    Ok(submissions) => {
+                        for message in submissions {
+                            submissions_tx.send(message).await.unwrap();
+                        }
+                    }
                     Err(e) => {
-                        info!("failed to archive messages: {:?}", e);
+                        error!("failed to pull block submissions: {:?}", e);
                         shutdown_notify.notify_waiters();
                         break;
                     }
@@ -120,9 +134,24 @@ async fn main() -> Result<()> {
         }
     });
 
+    let archive_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            match archive_block_submissions(&object_store, &redis_client, submissions_rx).await {
+                Ok(_) => {
+                    info!("archiving thread finished successfully");
+                }
+                Err(e) => {
+                    error!("failed to archive block submissions: {:?}", e);
+                    shutdown_notify.notify_waiters();
+                }
+            }
+        }
+    });
+
     let app_state = AppState {
         redis_health,
-        message_health,
+        redis_consumer_health,
     };
 
     let server_thread = tokio::spawn({
@@ -132,7 +161,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    try_join!(archive_thread, server_thread)?;
+    try_join!(archive_thread, server_thread, submissions_thread)?;
 
     Ok(())
 }
