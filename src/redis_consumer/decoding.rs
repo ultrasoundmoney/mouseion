@@ -1,4 +1,4 @@
-//! Decoding of Redis responses into Rust types.
+//! Decodes Redis bytes into Rust types.
 use block_submission_archiver::{BlockSubmission, STREAM_NAME};
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
@@ -6,9 +6,7 @@ use fred::{
 };
 use tracing::{debug, trace};
 
-use crate::pull_archive_entries::IdArchiveEntry;
-
-pub struct XReadGroupResponse(pub Option<Vec<IdArchiveEntry>>);
+pub struct XReadGroupResponse(pub Option<Vec<(String, BlockSubmission)>>);
 
 impl FromRedis for XReadGroupResponse {
     fn from_value(value: RedisValue) -> RedisResult<Self> {
@@ -46,8 +44,7 @@ impl FromRedis for XReadGroupResponse {
                         .expect("expected index 1 to be archive entry")
                         .convert()
                         .unwrap();
-                    let id_archive_entry_pair = IdArchiveEntry { id, entry };
-                    id_archive_entry_pairs.push(id_archive_entry_pair);
+                    id_archive_entry_pairs.push((id, entry));
                 }
 
                 Ok(Self(Some(id_archive_entry_pairs)))
@@ -61,7 +58,7 @@ impl FromRedis for XReadGroupResponse {
     }
 }
 
-pub struct XAutoClaimResponse(pub String, pub Vec<IdArchiveEntry>);
+pub struct XAutoClaimResponse(pub String, pub Vec<(String, BlockSubmission)>);
 
 impl FromRedis for XAutoClaimResponse {
     fn from_value(value: RedisValue) -> RedisResult<Self> {
@@ -104,7 +101,7 @@ impl FromRedis for XAutoClaimResponse {
                         let id: String = iter.next().expect("expected id at index 0").convert()?;
                         let entry: BlockSubmission =
                             iter.next().expect("expected entry at index 1").convert()?;
-                        IdArchiveEntry { id, entry }
+                        (id, entry)
                     };
                     id_archive_entry_pairs.push(id_archive_pair);
                 }

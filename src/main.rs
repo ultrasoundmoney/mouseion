@@ -13,55 +13,66 @@
 //! The full process should always be able to complete pulled messages within
 //! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
 //! process it also. This is however no big deal, as the storage process is idempotent.
-mod compress_archive_entries;
 mod health;
 mod object_stores;
 mod performance;
-mod pull_archive_entries;
+mod redis_consumer;
 mod server;
-mod store_archive_entries;
 mod trace_memory;
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use block_submission_archiver::{
     env::{self, ENV_CONFIG},
-    log,
+    log, STREAM_NAME,
 };
-use bytes::Bytes;
 use fred::{
-    prelude::{ClientLike, RedisClient},
+    prelude::{ClientLike, RedisClient, StreamsInterface},
     types::RedisConfig,
 };
-use futures::channel::mpsc::{self, channel};
+use futures::{StreamExt, TryStreamExt};
 use health::{RedisConsumerHealth, RedisHealth};
-use object_store::path::Path;
+use object_store::ObjectStore;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, Level};
 
-use crate::{
-    compress_archive_entries::{CompressArchiveEntries, GzipCompressor},
-    pull_archive_entries::PullArchiveEntries,
-};
-use crate::{
-    pull_archive_entries::RedisConsumer,
-    store_archive_entries::{ArchiveEntriesObjectStore, StoreArchiveEntries},
-};
+use crate::redis_consumer::RedisConsumer;
 
 const GROUP_NAME: &str = "default-group";
-const MESSAGE_BATCH_SIZE: u64 = 8;
-const ARCHIVE_ENTRIES_BUFFER_SIZE: u64 = MESSAGE_BATCH_SIZE * 4;
+const ARCHIVING_MAX_CONCURRENCY: usize = 8;
 
 #[derive(Clone)]
 pub struct AppState {
     message_health: RedisConsumerHealth,
     redis_health: RedisHealth,
 }
-#[async_trait]
-trait StoreArchiveEntry {
-    async fn store_entry(&self, path: &Path, bytes: &Bytes);
+
+async fn archive_block_submissions(
+    message_consumer: &mut RedisConsumer,
+    object_store: &impl ObjectStore,
+    redis_client: &RedisClient,
+) -> Result<()> {
+    let id_block_submission_pairs = message_consumer.pull_id_block_submission_pairs().await?;
+
+    let stream = futures::stream::iter(id_block_submission_pairs);
+    stream
+        .map(Ok)
+        .try_for_each_concurrent(
+            ARCHIVING_MAX_CONCURRENCY,
+            |(id, block_submission)| async move {
+                let json_gz_bytes = block_submission.compress().await?;
+
+                object_store
+                    .put(&block_submission.bundle_path(), json_gz_bytes)
+                    .await?;
+
+                redis_client.xack(STREAM_NAME, GROUP_NAME, &id).await?;
+
+                Ok(())
+            },
+        )
+        .await
 }
 
 #[tokio::main]
@@ -96,45 +107,28 @@ async fn main() -> Result<()> {
     let redis_health = RedisHealth::new(redis_client.clone());
     let message_health = RedisConsumerHealth::new();
 
-    let (archive_entries_tx, archive_entries_rx) =
-        mpsc::channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
-
-    let (stored_ids_tx, stored_ids_rx) = channel::<String>(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
-
-    let message_consumer = Arc::new(RedisConsumer::new(
-        redis_client.clone(),
-        message_health.clone(),
-        shutdown_notify.clone(),
-    ));
+    let mut message_consumer = RedisConsumer::new(redis_client.clone(), message_health.clone());
 
     message_consumer.ensure_consumer_group_exists().await?;
 
     message_consumer.delete_dead_consumers().await?;
 
-    let pull_archive_entries_thread = tokio::spawn(async move {
-        message_consumer
-            .pull_archive_entries(archive_entries_tx, stored_ids_rx)
-            .await
-    });
-
-    let (compressed_archive_entries_tx, compressed_archive_entries_rx) =
-        channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
-
-    let compressor = GzipCompressor::new(shutdown_notify.clone());
-
-    let compress_archive_entries_thread = tokio::spawn(async move {
-        compressor
-            .compress_archive_entries(archive_entries_rx, compressed_archive_entries_tx)
-            .await
-    });
-
-    let compressed_archive_entries_store =
-        ArchiveEntriesObjectStore::new(object_store, shutdown_notify.clone());
-
-    let store_entries_thread = tokio::spawn(async move {
-        compressed_archive_entries_store
-            .store_archive_entries(compressed_archive_entries_rx, stored_ids_tx)
-            .await
+    let archive_thread = tokio::spawn({
+        let shutdown_notify = shutdown_notify.clone();
+        async move {
+            loop {
+                match archive_block_submissions(&mut message_consumer, &object_store, &redis_client)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        info!("failed to archive messages: {:?}", e);
+                        shutdown_notify.notify_waiters();
+                        break;
+                    }
+                }
+            }
+        }
     });
 
     let app_state = AppState {
@@ -149,12 +143,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    try_join!(
-        pull_archive_entries_thread,
-        compress_archive_entries_thread,
-        store_entries_thread,
-        server_thread,
-    )?;
+    try_join!(archive_thread, server_thread)?;
 
     Ok(())
 }
