@@ -76,7 +76,7 @@ async fn store_block_submission(
                 );
                 Ok(())
             } else {
-                Err(e.into())
+                Err(e)
             }
         }
     }?;
