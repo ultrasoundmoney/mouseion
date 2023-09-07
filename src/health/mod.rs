@@ -1,8 +1,8 @@
-mod message_consumer;
 mod redis;
+mod redis_consumer;
 
-pub use message_consumer::MessageConsumerHealth;
 pub use redis::RedisHealth;
+pub use redis_consumer::RedisConsumerHealth;
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;

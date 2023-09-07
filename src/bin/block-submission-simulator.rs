@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use block_submission_archiver::{env::ENV_CONFIG, log, ArchiveEntry, STREAM_NAME};
+use block_submission_archiver::{env::ENV_CONFIG, log, BlockSubmission, STREAM_NAME};
 use flate2::read::GzDecoder;
 use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
         }
 
         let raw_block_submission = read_file(decompressed_path)?;
-        let archive_entry: ArchiveEntry = serde_json::from_str(&raw_block_submission)?;
+        let archive_entry: BlockSubmission = serde_json::from_str(&raw_block_submission)?;
 
         client
             .xadd(STREAM_NAME, false, None, "*", archive_entry)

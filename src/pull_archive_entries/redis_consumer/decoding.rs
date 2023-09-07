@@ -1,14 +1,14 @@
 //! Decoding of Redis responses into Rust types.
-use block_submission_archiver::{ArchiveEntry, STREAM_NAME};
+use block_submission_archiver::{BlockSubmission, STREAM_NAME};
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
     types::{FromRedis, RedisKey, RedisValue},
 };
 use tracing::{debug, trace};
 
-use super::IdArchiveEntryPair;
+use crate::pull_archive_entries::IdArchiveEntry;
 
-pub struct XReadGroupResponse(pub Option<Vec<IdArchiveEntryPair>>);
+pub struct XReadGroupResponse(pub Option<Vec<IdArchiveEntry>>);
 
 impl FromRedis for XReadGroupResponse {
     fn from_value(value: RedisValue) -> RedisResult<Self> {
@@ -41,12 +41,12 @@ impl FromRedis for XReadGroupResponse {
                         .expect("expected index 0 to be id")
                         .convert()
                         .unwrap();
-                    let entry: ArchiveEntry = iter
+                    let entry: BlockSubmission = iter
                         .next()
                         .expect("expected index 1 to be archive entry")
                         .convert()
                         .unwrap();
-                    let id_archive_entry_pair = IdArchiveEntryPair { id, entry };
+                    let id_archive_entry_pair = IdArchiveEntry { id, entry };
                     id_archive_entry_pairs.push(id_archive_entry_pair);
                 }
 
@@ -61,7 +61,7 @@ impl FromRedis for XReadGroupResponse {
     }
 }
 
-pub struct XAutoClaimResponse(pub String, pub Vec<IdArchiveEntryPair>);
+pub struct XAutoClaimResponse(pub String, pub Vec<IdArchiveEntry>);
 
 impl FromRedis for XAutoClaimResponse {
     fn from_value(value: RedisValue) -> RedisResult<Self> {
@@ -102,9 +102,9 @@ impl FromRedis for XAutoClaimResponse {
                     let id_archive_pair = {
                         let mut iter = message.into_array().into_iter();
                         let id: String = iter.next().expect("expected id at index 0").convert()?;
-                        let entry: ArchiveEntry =
+                        let entry: BlockSubmission =
                             iter.next().expect("expected entry at index 1").convert()?;
-                        IdArchiveEntryPair { id, entry }
+                        IdArchiveEntry { id, entry }
                     };
                     id_archive_entry_pairs.push(id_archive_pair);
                 }

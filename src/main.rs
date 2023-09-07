@@ -4,44 +4,51 @@
 //!
 //! ## Architecture
 //! The archiver is composed of three main components:
-//! - A component which pulls in new messages.
-//! - A component which claims pending messages.
-//! - A component which takes the received messages, compresses them, and stores them in object
-//!   storage.
+//! - A component which pulls in new messages and parses them.
+//! - A component which claims pending messages and parses them.
+//! - A component which takes parsed IdArchiveEntryPairs and compresses their archive entry.
+//! - A component which takes the compressed IdArchiveEntryPairs and stores them in object storage.
+//! - A component which acknowledges messages which have been successfully stored.
 //!
-//! The first two components push messages onto a channel. The third component pulls messages off.
-//! The third channel should always be able to process pulled messages within
+//! The full process should always be able to complete pulled messages within
 //! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
 //! process it also. This is however no big deal, as the storage process is idempotent.
-//!
-//! ## Improvements
-//! Would be nice to catch the SIGTERM and finish putting the current message, perhaps even the
-//! full message buffer, before shutting down.
-mod archiver;
+mod compress_archive_entries;
 mod health;
-mod message_consumer;
 mod object_stores;
 mod performance;
+mod pull_archive_entries;
 mod server;
+mod store_archive_entries;
 mod trace_memory;
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use block_submission_archiver::{
     env::{self, ENV_CONFIG},
     log,
 };
+use bytes::Bytes;
 use fred::{
     prelude::{ClientLike, RedisClient},
     types::RedisConfig,
 };
-use futures::channel::mpsc;
-use health::{MessageConsumerHealth, RedisHealth};
+use futures::channel::mpsc::{self, channel};
+use health::{RedisConsumerHealth, RedisHealth};
+use object_store::path::Path;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, Level};
 
-use crate::{archiver::Archiver, message_consumer::MessageConsumer};
+use crate::{
+    compress_archive_entries::{CompressArchiveEntries, GzipCompressor},
+    pull_archive_entries::PullArchiveEntries,
+};
+use crate::{
+    pull_archive_entries::RedisConsumer,
+    store_archive_entries::{ArchiveEntriesObjectStore, StoreArchiveEntries},
+};
 
 const GROUP_NAME: &str = "default-group";
 const MESSAGE_BATCH_SIZE: u64 = 8;
@@ -49,8 +56,12 @@ const ARCHIVE_ENTRIES_BUFFER_SIZE: u64 = MESSAGE_BATCH_SIZE * 4;
 
 #[derive(Clone)]
 pub struct AppState {
-    message_health: MessageConsumerHealth,
+    message_health: RedisConsumerHealth,
     redis_health: RedisHealth,
+}
+#[async_trait]
+trait StoreArchiveEntry {
+    async fn store_entry(&self, path: &Path, bytes: &Bytes);
 }
 
 #[tokio::main]
@@ -83,13 +94,14 @@ async fn main() -> Result<()> {
         .context("failed to connect to Redis")?;
 
     let redis_health = RedisHealth::new(redis_client.clone());
-    let message_health = MessageConsumerHealth::new();
+    let message_health = RedisConsumerHealth::new();
 
     let (archive_entries_tx, archive_entries_rx) =
         mpsc::channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
 
-    let message_consumer = Arc::new(MessageConsumer::new(
-        archive_entries_tx,
+    let (stored_ids_tx, stored_ids_rx) = channel::<String>(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
+
+    let message_consumer = Arc::new(RedisConsumer::new(
         redis_client.clone(),
         message_health.clone(),
         shutdown_notify.clone(),
@@ -99,27 +111,30 @@ async fn main() -> Result<()> {
 
     message_consumer.delete_dead_consumers().await?;
 
-    let pull_new_messages_thread = tokio::spawn({
-        let message_consumer = message_consumer.clone();
-        async move { message_consumer.run_consume_new_messages().await }
+    let pull_archive_entries_thread = tokio::spawn(async move {
+        message_consumer
+            .pull_archive_entries(archive_entries_tx, stored_ids_rx)
+            .await
     });
 
-    let pull_pending_messages_thread = tokio::spawn({
-        let message_consumer = message_consumer.clone();
-        async move {
-            message_consumer.run_consume_pending_messages().await;
-        }
+    let (compressed_archive_entries_tx, compressed_archive_entries_rx) =
+        channel(ARCHIVE_ENTRIES_BUFFER_SIZE as usize);
+
+    let compressor = GzipCompressor::new(shutdown_notify.clone());
+
+    let compress_archive_entries_thread = tokio::spawn(async move {
+        compressor
+            .compress_archive_entries(archive_entries_rx, compressed_archive_entries_tx)
+            .await
     });
 
-    let message_archiver =
-        Archiver::new(redis_client.clone(), object_store, shutdown_notify.clone());
+    let compressed_archive_entries_store =
+        ArchiveEntriesObjectStore::new(object_store, shutdown_notify.clone());
 
-    let process_messages_thread = tokio::spawn({
-        async move {
-            message_archiver
-                .run_archive_entries(archive_entries_rx)
-                .await;
-        }
+    let store_entries_thread = tokio::spawn(async move {
+        compressed_archive_entries_store
+            .store_archive_entries(compressed_archive_entries_rx, stored_ids_tx)
+            .await
     });
 
     let app_state = AppState {
@@ -135,9 +150,9 @@ async fn main() -> Result<()> {
     });
 
     try_join!(
-        pull_new_messages_thread,
-        pull_pending_messages_thread,
-        process_messages_thread,
+        pull_archive_entries_thread,
+        compress_archive_entries_thread,
+        store_entries_thread,
         server_thread,
     )?;
 

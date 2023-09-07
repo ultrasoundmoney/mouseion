@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::Write};
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use chrono::{Datelike, Timelike};
 use flate2::{write::GzEncoder, Compression};
@@ -11,20 +11,20 @@ use fred::{
 use object_store::path::Path;
 use serde::{Deserialize, Serialize};
 use tokio::task::spawn_blocking;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::units::Slot;
 
 /// Block submission archive entries.
 /// These are block submissions as they came in on the relay, plus some metadata.
 #[derive(Deserialize, Serialize)]
-pub struct ArchiveEntry {
+pub struct BlockSubmission {
     eligible_at: i64,
     payload: serde_json::Value,
     received_at: u64,
 }
 
-impl std::fmt::Debug for ArchiveEntry {
+impl std::fmt::Debug for BlockSubmission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state_root = self.state_root();
         f.debug_struct("ArchiveEntry")
@@ -35,8 +35,8 @@ impl std::fmt::Debug for ArchiveEntry {
     }
 }
 
-impl From<ArchiveEntry> for MultipleOrderedPairs {
-    fn from(entry: ArchiveEntry) -> Self {
+impl From<BlockSubmission> for MultipleOrderedPairs {
+    fn from(entry: BlockSubmission) -> Self {
         let pairs: Vec<(String, String)> = vec![
             ("eligible_at".into(), entry.eligible_at.to_string()),
             ("payload".into(), entry.payload.to_string()),
@@ -46,7 +46,7 @@ impl From<ArchiveEntry> for MultipleOrderedPairs {
     }
 }
 
-impl FromRedis for ArchiveEntry {
+impl FromRedis for BlockSubmission {
     fn from_value(value: RedisValue) -> Result<Self, RedisError> {
         let mut map: HashMap<String, Bytes> = value.convert()?;
         let eligible_at = {
@@ -84,7 +84,7 @@ impl FromRedis for ArchiveEntry {
     }
 }
 
-impl ArchiveEntry {
+impl BlockSubmission {
     pub fn new(eligible_at: i64, payload: serde_json::Value, received_at: u64) -> Self {
         Self {
             eligible_at,
@@ -109,6 +109,7 @@ impl ArchiveEntry {
         Path::from(path_string)
     }
 
+    #[instrument(skip(self), fields(slot = %self.slot(), state_root = %self.state_root()))]
     pub async fn compress(&self) -> Result<Bytes> {
         let slot = self.slot();
         let state_root = self.state_root();
@@ -120,7 +121,7 @@ impl ArchiveEntry {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(json_str.as_bytes())?;
             let json_gz = encoder.finish()?.into();
-            Ok::<_, Error>(json_gz)
+            anyhow::Ok(json_gz)
         })
         .await??;
         let json_gz_size_kb = json_gz.len() / 1000;

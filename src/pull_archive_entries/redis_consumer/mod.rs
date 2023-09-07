@@ -7,20 +7,26 @@
 //! and merge any implementation.
 mod decoding;
 
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 
-use anyhow::{bail, Result};
-use block_submission_archiver::{env::ENV_CONFIG, ArchiveEntry, STREAM_NAME};
+use anyhow::{bail, Context, Result};
+use async_trait::async_trait;
+use block_submission_archiver::{env::ENV_CONFIG, STREAM_NAME};
 use fred::prelude::{RedisClient, RedisResult, StreamsInterface};
-use futures::{channel::mpsc::Sender, lock::Mutex, select, FutureExt, SinkExt};
+use futures::{
+    channel::mpsc::{Receiver, Sender},
+    select, FutureExt, SinkExt, StreamExt, TryStreamExt,
+};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
 use tokio::sync::Notify;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{health::MessageConsumerHealth, GROUP_NAME, MESSAGE_BATCH_SIZE};
+use crate::{health::RedisConsumerHealth, GROUP_NAME, MESSAGE_BATCH_SIZE};
 
 use decoding::{ConsumerInfo, XAutoClaimResponse, XReadGroupResponse};
+
+use super::{IdArchiveEntry, PullArchiveEntries};
 
 // Claim pending messages that are more than 1 minutes old.
 const MAX_MESSAGE_PROCESS_DURATION_MS: u64 = 60 * 1000;
@@ -35,35 +41,20 @@ lazy_static! {
     static ref PULL_PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 }
 
-#[derive(Debug)]
-pub struct IdArchiveEntryPair {
-    pub id: String,
-    pub entry: ArchiveEntry,
-}
-
-impl IdArchiveEntryPair {
-    pub async fn ack(&self, client: &RedisClient) -> Result<()> {
-        client.xack(STREAM_NAME, GROUP_NAME, &self.id).await?;
-        Ok(())
-    }
-}
-
-pub struct MessageConsumer {
-    archive_entries_tx: Arc<Mutex<Sender<IdArchiveEntryPair>>>,
+#[derive(Clone)]
+pub struct RedisConsumer {
     client: RedisClient,
-    message_health: MessageConsumerHealth,
+    message_health: RedisConsumerHealth,
     shutdown_notify: Arc<Notify>,
 }
 
-impl MessageConsumer {
+impl RedisConsumer {
     pub fn new(
-        archive_entries_tx: Sender<IdArchiveEntryPair>,
         client: RedisClient,
-        message_health: MessageConsumerHealth,
+        message_health: RedisConsumerHealth,
         shutdown_notify: Arc<Notify>,
     ) -> Self {
         Self {
-            archive_entries_tx: Arc::new(Mutex::new(archive_entries_tx)),
             client,
             message_health,
             shutdown_notify,
@@ -89,72 +80,6 @@ impl MessageConsumer {
             }
         }
         Ok(())
-    }
-
-    /// Pulls new messages from Redis and sends them to the archiver.
-    async fn retrieve_new_messages(&self) -> Result<()> {
-        loop {
-            let result: XReadGroupResponse = self
-                .client
-                .xreadgroup(
-                    GROUP_NAME,
-                    &*CONSUMER_ID,
-                    Some(MESSAGE_BATCH_SIZE),
-                    Some(BLOCK_DURATION_MS),
-                    false,
-                    STREAM_NAME,
-                    // The > operator means we only get new messages, not old ones. This also means if
-                    // any messages are pending for our consumer, we won't get them. This is fine.
-                    // We're set up such that if we crash, we appear with a new consumer ID. This
-                    // means the pending messages will be 'forgotten', and after MIN_UNACKED_TIME_MS
-                    // will be claimed by another consumer.
-                    ">",
-                )
-                .await?;
-
-            let id_archive_entry_pairs: Vec<IdArchiveEntryPair> = match result.0 {
-                Some(id_archive_entry_pairs) => id_archive_entry_pairs,
-                None => {
-                    // No new messages available.
-                    trace!("no new messages, sleeping for 1s");
-                    continue;
-                }
-            };
-
-            debug!(
-                count = id_archive_entry_pairs.len(),
-                "received new messages"
-            );
-
-            for id_archive_entry_pair in id_archive_entry_pairs {
-                self.archive_entries_tx
-                    .lock()
-                    .await
-                    .send(id_archive_entry_pair)
-                    .await?;
-            }
-
-            self.message_health.set_last_message_received_now();
-        }
-    }
-
-    pub async fn run_consume_new_messages(&self) {
-        debug!(consumer_id = *CONSUMER_ID, "pulling new messages");
-        select! {
-            _ = self.shutdown_notify.notified().fuse() => {
-                info!("pulling new messages thread shutting down");
-            }
-            result = self.retrieve_new_messages().fuse() => {
-                match result {
-                    Ok(_) => info!("stopped pulling new messages"),
-                    Err(e) => {
-                        error!("error while pulling new messages: {:?}", e);
-                        self.shutdown_notify.notify_waiters();
-                    }
-                }
-            }
-
-        }
     }
 
     #[instrument(skip(self))]
@@ -193,12 +118,61 @@ impl MessageConsumer {
         Ok(())
     }
 
+    // Pulls new block submissions from Redis.
+    async fn pull_new_messages(
+        &self,
+        mut archive_entries_tx: Sender<IdArchiveEntry>,
+    ) -> Result<()> {
+        loop {
+            let result: XReadGroupResponse = self
+                .client
+                .xreadgroup(
+                    GROUP_NAME,
+                    &*CONSUMER_ID,
+                    Some(MESSAGE_BATCH_SIZE),
+                    Some(BLOCK_DURATION_MS),
+                    false,
+                    STREAM_NAME,
+                    // The > operator means we only get new messages, not old ones. This also means if
+                    // any messages are pending for our consumer, we won't get them. This is fine.
+                    // We're set up such that if we crash, we appear with a new consumer ID. This
+                    // means the pending messages will be 'forgotten', and after MIN_UNACKED_TIME_MS
+                    // will be claimed by another consumer.
+                    ">",
+                )
+                .await?;
+
+            let id_archive_entry_pairs: Vec<IdArchiveEntry> = match result.0 {
+                Some(id_archive_entry_pairs) => id_archive_entry_pairs,
+                None => {
+                    // No new messages available.
+                    trace!("no new messages, sleeping for 1s");
+                    continue;
+                }
+            };
+
+            debug!(
+                count = id_archive_entry_pairs.len(),
+                "received new messages"
+            );
+
+            for id_archive_entry_pair in id_archive_entry_pairs {
+                archive_entries_tx.send(id_archive_entry_pair).await?;
+            }
+
+            self.message_health.set_last_message_received_now();
+        }
+    }
+
     // When a consumer crashes, it forgets its ID and any delivered but unacked messages will sit
     // forever as pending messages for the consumer. Although it is easy to give consumers stable IDs
     // we'd still have the same problem when scaling down the number of active consumers. Instead, we
     // try not to crash, and have this function which claims any pending messages that have hit
     // MAX_MESSAGE_PROCESS_DURATION_MS. A message getting processed twice is fine.
-    pub async fn consume_pending_messages(&self) -> Result<()> {
+    pub async fn pull_pending_messages(
+        &self,
+        mut archive_entries_tx: Sender<IdArchiveEntry>,
+    ) -> Result<()> {
         // Redis scans a finite number of pending messages and provides us with an ID to continue
         // in case there were more messages pending than we claimed.
         let mut autoclaim_id: String = "0-0".to_string();
@@ -225,7 +199,7 @@ impl MessageConsumer {
                 );
 
                 for message in id_archive_entry_pairs {
-                    self.archive_entries_tx.lock().await.send(message).await?;
+                    archive_entries_tx.send(message).await?;
                 }
             }
 
@@ -242,21 +216,68 @@ impl MessageConsumer {
         }
     }
 
-    pub async fn run_consume_pending_messages(&self) {
-        debug!(consumer_id = *CONSUMER_ID, "claiming pending messages");
+    // Acknowledges messages that have been successfully stored.
+    async fn acknowledge_stored_messages(&self, stored_ids_rx: Receiver<String>) -> Result<()> {
+        stored_ids_rx
+            .map(Ok)
+            .try_for_each_concurrent(4, |id| async move {
+                self.client
+                    .xack(STREAM_NAME, GROUP_NAME, &id)
+                    .await
+                    .context("failed to acknowledge stored message")?;
+                Ok(())
+            })
+            .await
+    }
+}
+
+#[async_trait]
+impl PullArchiveEntries for RedisConsumer {
+    async fn pull_archive_entries(
+        self: Arc<Self>,
+        archive_entries_tx: Sender<IdArchiveEntry>,
+        stored_archive_entries_rx: Receiver<String>,
+    ) {
         select! {
-                _ = self.shutdown_notify.notified().fuse() => {
-                    debug!("shutting down claim pending messages thread");
-                }
-                result = self.consume_pending_messages().fuse() => {
-                    match result {
-                        Ok(_) => info!("stopped pulling pending messages"),
-                        Err(e) => {
-                            error!("error while pulling pending messages: {:?}", e);
-                            self.shutdown_notify.notify_waiters();
-                        }
+            _ = self.shutdown_notify.notified().fuse() => {
+                info!("shutdown signal received, pull archive entries thread shutting down");
+            }
+            result = self.pull_new_messages(archive_entries_tx.clone()).fuse() => {
+                match result {
+                    Ok(_) => {
+                        info!("pull_new_messages thread stopped");
+                        self.shutdown_notify.notify_waiters();
+                    }
+                    Err(e) => {
+                        error!("error while pulling new messages: {:?}", e);
+                        self.shutdown_notify.notify_waiters();
                     }
                 }
+            }
+            result = self.pull_pending_messages(archive_entries_tx).fuse() => {
+                match result {
+                    Ok(_) => {
+                        info!("pull_pending_messages thread stopped");
+                        self.shutdown_notify.notify_waiters();
+                    }
+                    Err(e) => {
+                        error!("error while pulling pending messages: {:?}", e);
+                        self.shutdown_notify.notify_waiters();
+                    }
+                }
+            }
+            result = self.acknowledge_stored_messages(stored_archive_entries_rx).fuse() => {
+                match result {
+                    Ok(_) => {
+                        info!("acknowledge_stored_messages thread stopped");
+                        self.shutdown_notify.notify_waiters();
+                    }
+                    Err(e) => {
+                        error!("error while acknowledging stored messages: {:?}", e);
+                        self.shutdown_notify.notify_waiters();
+                    }
+                }
+            }
         }
     }
 }
