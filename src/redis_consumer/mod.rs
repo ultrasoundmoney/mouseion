@@ -14,7 +14,7 @@ use lazy_static::lazy_static;
 use nanoid::nanoid;
 use tracing::{debug, info, instrument, trace};
 
-use crate::{health::RedisConsumerHealth, GROUP_NAME};
+use crate::{health::RedisConsumerHealth, performance::TimedExt, GROUP_NAME};
 
 use decoding::{ConsumerInfo, XAutoClaimResponse, XReadGroupResponse};
 
@@ -186,8 +186,14 @@ impl RedisConsumer {
     }
 
     pub async fn pull_id_block_submission_pairs(&mut self) -> Result<Vec<IdBlockSubmissionPairs>> {
-        let new_messages = self.pull_new_submissions().await?;
-        let pending_messages = self.pull_pending_submissions().await?;
+        let new_messages = self
+            .pull_new_submissions()
+            .timed("pull_new_submissions")
+            .await?;
+        let pending_messages = self
+            .pull_pending_submissions()
+            .timed("pull_pending_submissions")
+            .await?;
         Ok(new_messages.into_iter().chain(pending_messages).collect())
     }
 }

@@ -24,8 +24,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use block_submission_archiver::{
     env::{self, ENV_CONFIG},
-    log, STREAM_NAME,
+    log, BlockSubmission, STREAM_NAME,
 };
+use bytes::Bytes;
 use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
     types::RedisConfig,
@@ -36,14 +37,15 @@ use futures::{
 };
 use health::{RedisConsumerHealth, RedisHealth};
 use object_store::ObjectStore;
+use performance::TimedExt;
 use redis_consumer::IdBlockSubmissionPairs;
 use tokio::{sync::Notify, try_join};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::redis_consumer::RedisConsumer;
 
 const GROUP_NAME: &str = "default-group";
-const ARCHIVING_MAX_CONCURRENCY: usize = 32;
+const ARCHIVING_MAX_CONCURRENCY: usize = 16;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -51,7 +53,38 @@ pub struct AppState {
     redis_health: RedisHealth,
 }
 
-async fn archive_block_submissions(
+async fn store_block_submission(
+    object_store: &impl ObjectStore,
+    block_submission: &BlockSubmission,
+    json_gz_bytes: Bytes,
+) -> Result<()> {
+    let store_result = object_store
+        .put(&block_submission.bundle_path(), json_gz_bytes)
+        .timed("store_block_submission")
+        .await
+        .context("failed to store block submission");
+
+    match store_result {
+        Ok(_) => anyhow::Ok(()),
+        Err(e) => {
+            // Sometimes archivers manage to grab and attempt to store the same message. As
+            // the operations are idempotent, we simply skip 409s.
+            if format!("{:?}", &e).contains("OperationAborted") {
+                debug!(
+                    state_root = block_submission.state_root(),
+                    "hit 409 - conflict when storing bundle, ignoring"
+                );
+                Ok(())
+            } else {
+                Err(e.into())
+            }
+        }
+    }?;
+
+    Ok(())
+}
+
+async fn compress_and_store_submissions(
     object_store: &impl ObjectStore,
     redis_client: &RedisClient,
     submissions_stream: impl Stream<Item = IdBlockSubmissionPairs>,
@@ -61,12 +94,16 @@ async fn archive_block_submissions(
         .try_for_each_concurrent(
             ARCHIVING_MAX_CONCURRENCY,
             |(id, block_submission): IdBlockSubmissionPairs| async move {
-                let json_gz_bytes = block_submission.compress().await?;
-
-                object_store
-                    .put(&block_submission.bundle_path(), json_gz_bytes)
+                // Compress
+                let json_gz_bytes = block_submission
+                    .compress()
+                    .timed("compress_block_submission")
                     .await?;
 
+                // Store
+                store_block_submission(object_store, &block_submission, json_gz_bytes).await?;
+
+                // Acknowledge
                 redis_client.xack(STREAM_NAME, GROUP_NAME, &id).await?;
 
                 Ok(())
@@ -137,7 +174,8 @@ async fn main() -> Result<()> {
     let archive_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
-            match archive_block_submissions(&object_store, &redis_client, submissions_rx).await {
+            match compress_and_store_submissions(&object_store, &redis_client, submissions_rx).await
+            {
                 Ok(_) => {
                     info!("archiving thread finished successfully");
                 }
