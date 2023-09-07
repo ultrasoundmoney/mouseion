@@ -83,17 +83,6 @@ async fn main() -> Result<()> {
 
     let shutdown_notify = Arc::new(Notify::new());
 
-    if tracing::enabled!(Level::TRACE) {
-        let handle = tokio::spawn(async move {
-            trace_memory::report_memory_periodically().await;
-        });
-        let shutdown_notify = shutdown_notify.clone();
-        tokio::spawn(async move {
-            shutdown_notify.notified().await;
-            handle.abort();
-        });
-    }
-
     let object_store = object_stores::build_env_based_store()?;
 
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
