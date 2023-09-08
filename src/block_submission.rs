@@ -198,6 +198,11 @@ mod tests {
     // unlucky time it will fail.
     #[test]
     fn test_bundle_path_generation() {
+        // This test unfortunately depends on the ENV, which means we need a fully formed ENV
+        // available.
+        if std::env::var("REDIS_URI").is_err() {
+            std::env::set_var("REDIS_URI", "dummy_redis_uri")
+        }
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
         let submission = BlockSubmission::new(100, payload, 200, 400);
