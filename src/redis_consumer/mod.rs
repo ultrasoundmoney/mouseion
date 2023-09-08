@@ -28,15 +28,17 @@ use crate::{health::RedisConsumerHealth, GROUP_NAME};
 
 use decoding::{ConsumerInfo, XAutoClaimResponse, XReadGroupResponse};
 
-// Claim pending messages that are more than 1 minutes old.
-const MAX_MESSAGE_PROCESS_DURATION_MS: u64 = 60 * 1000;
-// In order to avoid polling we use Redis' BLOCK option. This is the maximum time we'll want Redis
-// to wait for new data before returning an empty response.
+// Consumers claim messages from other consumers which have failed to acknowledge their messages
+// for longer than this limit.
+const MAX_MESSAGE_ACK_DURATION_MS: u64 = 60 * 1000;
+// In order to avoid polling we use Redis' BLOCK option. Whenever no messages are available, this
+// is the maximum time we'll want Redis to wait for new data before returning an empty response.
 const BLOCK_DURATION_MS: u64 = 8000;
 // After a consumer has been idle for 8 minutes, we consider it crashed and remove it.
 const MAX_CONSUMER_IDLE_MS: u64 = 8 * 60 * 1000;
 // Number of messages to pull from Redis at a time.
 const MESSAGE_BATCH_SIZE: u64 = 8;
+// How often to ack messages. We buffer them for efficiency
 const ACK_SUBMISSIONS_DURATION_MS: u64 = 200;
 
 lazy_static! {
@@ -193,7 +195,7 @@ impl RedisConsumer {
                     STREAM_NAME,
                     GROUP_NAME,
                     &*CONSUMER_ID,
-                    MAX_MESSAGE_PROCESS_DURATION_MS,
+                    MAX_MESSAGE_ACK_DURATION_MS,
                     &autoclaim_id,
                     Some(MESSAGE_BATCH_SIZE),
                     false,

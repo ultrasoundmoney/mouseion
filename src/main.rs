@@ -6,13 +6,9 @@
 //! The archiver is composed of three main components:
 //! - A component which pulls in new messages and parses them.
 //! - A component which claims pending messages and parses them.
-//! - A component which takes parsed IdBlockSubmissionPairs and compresses the block submission.
-//! - A component which takes the compressed IdBlockSubmissionPairs and stores them in object storage.
+//! - A component which takes parsed block submissions and compresses them.
+//! - A component which takes stores the compressed block submissions in object storage.
 //! - A component which acknowledges messages which have been successfully stored.
-//!
-//! The full process should always be able to complete pulled messages within
-//! MAX_MESSAGE_PROCESS_DURATION_MS. If it doesn't another consumer will claim the message and
-//! process it also. This is however no big deal, as the storage process is idempotent.
 mod compression;
 mod health;
 mod object_store;
