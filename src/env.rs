@@ -207,10 +207,14 @@ mod tests {
 
         std::env::remove_var("ENV");
         assert_eq!(get_env(), Env::Dev);
+    }
 
+    #[test]
+    #[should_panic]
+    #[ignore = "this test breaks ENV for parallel tests"]
+    fn test_get_env_panics() {
         std::env::set_var("ENV", "invalid_env");
-        let result = std::panic::catch_unwind(|| get_env());
-        assert!(result.is_err());
+        get_env();
     }
 
     #[test]
