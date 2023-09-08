@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tokio::time::interval;
-use tracing::debug;
+use tracing::info;
 
 // Count the number of blocks archived.
 #[derive(Debug)]
@@ -33,7 +33,7 @@ impl BlockCounter {
     pub fn log(&self) {
         let count = self.count.load(Ordering::Relaxed);
         let per_second = self.per_second();
-        debug!(count, per_second, "block submission archive rate");
+        info!(count, per_second, "block submission archive rate");
     }
 }
 
