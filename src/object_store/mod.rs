@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use block_submission_archiver::env::ENV_CONFIG;
+use block_submission_archiver::{env::ENV_CONFIG, BlockSubmission};
+use bytes::Bytes;
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt, TryStreamExt,
@@ -13,9 +14,9 @@ use object_store_lib::{
     ObjectStore, RetryConfig,
 };
 use tokio::{sync::Notify, task::JoinHandle};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
-use crate::compression::IdBlockSubmissionCompressed;
+use crate::{compression::IdBlockSubmissionCompressed, performance::BlockCounter};
 
 const MAX_CONCURRENCY: usize = 8;
 
@@ -52,64 +53,84 @@ pub fn build_env_based_store() -> Result<Box<dyn ObjectStore>> {
     }
 }
 
+#[instrument(skip_all, fields(slot = %block_submission.slot(), state_root = %block_submission.state_root()))]
+async fn store_submission(
+    object_store: &dyn ObjectStore,
+    block_submission: &BlockSubmission,
+    json_gz_bytes: Bytes,
+) -> Result<()> {
+    let result = object_store
+        .put(&block_submission.bundle_path(), json_gz_bytes)
+        .await
+        .context("failed to store block submission");
+
+    // Sometimes archivers manage to grab and attempt to store the same message. As
+    // the operations are idempotent, we simply skip 409s.
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if format!("{:?}", &e).contains("OperationAborted") {
+                debug!(
+                    state_root = block_submission.state_root(),
+                    "hit 409 - conflict when storing bundle, ignoring"
+                );
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 async fn store_submissions(
+    block_counter: &BlockCounter,
     compressed_submissions_rx: Receiver<IdBlockSubmissionCompressed>,
     stored_submissions_tx: Sender<String>,
 ) -> Result<()> {
-    let object_store = build_env_based_store()?;
+    let object_store = &build_env_based_store()?;
 
     compressed_submissions_rx
         .map(Ok)
         .try_for_each_concurrent(MAX_CONCURRENCY, |(id, block_submission, json_gz_bytes)| {
-            let object_store = &object_store;
+            let object_store = object_store.clone();
+            let block_counter = block_counter.clone();
             let mut stored_submissions_tx = stored_submissions_tx.clone();
-
             async move {
-                let store_result = {
-                    let result = object_store
-                        .put(&block_submission.bundle_path(), json_gz_bytes)
-                        .await
-                        .context("failed to store block submission");
+                let result = store_submission(object_store, &block_submission, json_gz_bytes).await;
 
-                    // Sometimes archivers manage to grab and attempt to store the same message. As
-                    // the operations are idempotent, we simply skip 409s.
-                    match result {
-                        Ok(_) => Ok(()),
-                        Err(e) => {
-                            if format!("{:?}", &e).contains("OperationAborted") {
-                                debug!(
-                                    state_root = block_submission.state_root(),
-                                    "hit 409 - conflict when storing bundle, ignoring"
-                                );
-                                Ok(())
-                            } else {
-                                Err(e)
-                            }
-                        }
+                match result {
+                    Ok(_) => {
+                        debug!(
+                            state_root = block_submission.state_root(),
+                            "stored block submission"
+                        );
+                        block_counter.increment();
+                        stored_submissions_tx
+                            .send(id)
+                            .await
+                            .context("failed to send stored submission id")
                     }
-                };
-
-                if store_result.is_ok() {
-                    debug!(
-                        state_root = block_submission.state_root(),
-                        "stored block submission"
-                    );
-                    stored_submissions_tx.send(id).await?;
+                    Err(e) => Err(e),
                 }
-
-                store_result
             }
         })
         .await
 }
 
 pub fn run_store_submissions_thread(
+    block_counter: Arc<BlockCounter>,
     compressed_submissions_rx: Receiver<IdBlockSubmissionCompressed>,
     stored_submissions_tx: Sender<String>,
     shutdown_notify: Arc<Notify>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        match store_submissions(compressed_submissions_rx, stored_submissions_tx).await {
+        match store_submissions(
+            &block_counter,
+            compressed_submissions_rx,
+            stored_submissions_tx,
+        )
+        .await
+        {
             Ok(_) => info!("no more submissions to store, thread exiting"),
             Err(e) => {
                 error!("failed to store submissions: {:?}", e);

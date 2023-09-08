@@ -161,7 +161,7 @@ impl BlockSubmission {
         Ok(json_gz)
     }
 
-    fn slot(&self) -> Slot {
+    pub fn slot(&self) -> Slot {
         let slot_str = self.payload["message"]["slot"].as_str().unwrap();
         slot_str.parse::<Slot>().unwrap()
     }

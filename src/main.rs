@@ -31,9 +31,12 @@ use futures::channel::mpsc::{self};
 use health::{RedisConsumerHealth, RedisHealth};
 use redis_consumer::IdBlockSubmission;
 use tokio::{sync::Notify, try_join};
-use tracing::info;
+use tracing::{info, trace};
 
-use crate::{compression::IdBlockSubmissionCompressed, redis_consumer::RedisConsumer};
+use crate::{
+    compression::IdBlockSubmissionCompressed, performance::BlockCounter,
+    redis_consumer::RedisConsumer,
+};
 
 const GROUP_NAME: &str = "default-group";
 
@@ -54,6 +57,29 @@ async fn main() -> Result<()> {
     // the server thread does not. We use this notify to shutdown the server thread when any other
     // thread panics.
     let shutdown_notify = Arc::new(Notify::new());
+
+    // Track our block archival count.
+    let block_counter = Arc::new(BlockCounter::new());
+    let log_block_counter_thread = {
+        if tracing::enabled!(tracing::Level::INFO) || ENV_CONFIG.log_perf {
+            let handle = tokio::spawn({
+                let block_counter = block_counter.clone();
+                async move {
+                    performance::report_archive_rate_periodically(&block_counter).await;
+                }
+            });
+            let shutdown_notify = shutdown_notify.clone();
+            tokio::spawn(async move {
+                shutdown_notify.notified().await;
+                trace!("shutting down block counter thread");
+                handle.abort();
+            })
+        } else {
+            // Return a future which immediately completes.
+            trace!("not starting block counter thread");
+            tokio::spawn(async {})
+        }
+    };
 
     // Set up the shared Redis client.
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
@@ -107,6 +133,7 @@ async fn main() -> Result<()> {
 
     // The storage thread takes compressed submissions and stores them in object storage.
     let storage_thread = object_store::run_store_submissions_thread(
+        block_counter,
         compressed_submissions_rx,
         stored_submissions_tx,
         shutdown_notify.clone(),
@@ -130,6 +157,7 @@ async fn main() -> Result<()> {
     try_join!(
         ack_thread,
         compression_thread,
+        log_block_counter_thread,
         new_messages_thread,
         pending_messages_thread,
         server_thread,

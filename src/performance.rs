@@ -1,59 +1,46 @@
-use pin_project::pin_project;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::Instant;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+use tokio::time::interval;
 use tracing::debug;
 
-use crate::env::ENV_CONFIG;
-
-/// A wrapper around a Future which adds timing data.
-#[pin_project]
-pub struct Timed<Fut>
-where
-    Fut: Future,
-{
-    #[pin]
-    inner: Fut,
-    name: String,
-    start: Option<Instant>,
+// Count the number of blocks archived.
+#[derive(Debug)]
+pub struct BlockCounter {
+    count: AtomicU32,
+    started_on: Instant,
 }
 
-impl<Fut> Future for Timed<Fut>
-where
-    Fut: Future,
-{
-    type Output = Fut::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let this = self.project();
-        let start = this.start.get_or_insert_with(Instant::now);
-
-        match this.inner.poll(cx) {
-            // If the inner future is still pending, this wrapper is still pending.
-            Poll::Pending => Poll::Pending,
-
-            // If the inner future is done, measure the elapsed time and finish this wrapper future.
-            Poll::Ready(v) => {
-                if ENV_CONFIG.log_perf {
-                    let elapsed = start.elapsed();
-                    debug!("{} took {:.2?}", this.name, elapsed);
-                }
-                Poll::Ready(v)
-            }
+impl BlockCounter {
+    pub fn new() -> Self {
+        Self {
+            count: AtomicU32::new(0),
+            started_on: Instant::now(),
         }
+    }
+
+    pub fn increment(&self) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // Format a pretty message showing our block submissions archived per second.
+    fn per_second(&self) -> f64 {
+        let elapsed = self.started_on.elapsed();
+        let seconds = elapsed.as_secs_f64();
+        let count = self.count.load(Ordering::Relaxed);
+        count as f64 / seconds
+    }
+
+    pub fn log(&self) {
+        let count = self.count.load(Ordering::Relaxed);
+        let per_second = self.per_second();
+        debug!(count, per_second, "block submission archive rate");
     }
 }
 
-pub trait TimedExt: Sized + Future {
-    fn timed(self, name: &str) -> Timed<Self> {
-        Timed {
-            inner: self,
-            name: name.to_string(),
-            start: None,
-        }
+pub async fn report_archive_rate_periodically(block_counter: &BlockCounter) {
+    let mut interval = interval(Duration::from_secs(8));
+    loop {
+        interval.tick().await;
+        block_counter.log();
     }
 }
-
-// All futures can use the `.timed` method defined above
-impl<F: Future> TimedExt for F {}
