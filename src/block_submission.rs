@@ -22,6 +22,7 @@ pub struct BlockSubmission {
     eligible_at: i64,
     payload: serde_json::Value,
     received_at: u64,
+    status_code: Option<u16>,
 }
 
 impl std::fmt::Debug for BlockSubmission {
@@ -76,20 +77,39 @@ impl FromRedis for BlockSubmission {
                 .context("failed to parse block submission payload as JSON")
                 .map_err(|err| RedisError::new(RedisErrorKind::Parse, err.to_string()))?
         };
+        let status_code = {
+            let status_code_bytes = map.remove("status_code");
+            // Until the builder-api is updated to match we allow this to be missing.
+            match status_code_bytes {
+                None => None,
+                Some(bytes) => {
+                    let str = String::from_utf8(bytes.to_vec())?;
+                    let status_code = str.parse::<u16>()?;
+                    Some(status_code)
+                }
+            }
+        };
         Ok(Self {
             eligible_at,
             payload,
             received_at,
+            status_code,
         })
     }
 }
 
 impl BlockSubmission {
-    pub fn new(eligible_at: i64, payload: serde_json::Value, received_at: u64) -> Self {
+    pub fn new(
+        eligible_at: i64,
+        payload: serde_json::Value,
+        received_at: u64,
+        status_code: u16,
+    ) -> Self {
         Self {
             eligible_at,
             payload,
             received_at,
+            status_code: Some(status_code),
         }
     }
 
