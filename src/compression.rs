@@ -55,3 +55,26 @@ pub fn run_compression_thread(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::channel::mpsc;
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn test_run_compression_thread() {
+        let (mut submissions_tx, submissions_rx) = mpsc::channel(32);
+        let (compressed_submissions_tx, _) = mpsc::channel(32);
+        let shutdown_notify = Arc::new(Notify::new());
+
+        let handle = run_compression_thread(
+            submissions_rx,
+            compressed_submissions_tx.clone(),
+            shutdown_notify.clone(),
+        );
+        submissions_tx.close_channel();
+        handle.await.unwrap();
+    }
+}

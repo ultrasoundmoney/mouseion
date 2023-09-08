@@ -173,3 +173,75 @@ impl BlockSubmission {
             .to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use fred::types::{RedisMap, RedisValue};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn create_block_submission() {
+        let payload =
+            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
+        let submission = BlockSubmission::new(100, payload.clone(), 200, 400);
+
+        assert_eq!(submission.eligible_at, 100);
+        assert_eq!(submission.payload, payload);
+        assert_eq!(submission.received_at, 200);
+        assert_eq!(submission.status_code, Some(400));
+    }
+
+    // This test depends on the environment, some tests break the environment, if it runs at an
+    // unlucky time it will fail.
+    #[test]
+    fn test_bundle_path_generation() {
+        let payload =
+            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
+        let submission = BlockSubmission::new(100, payload, 200, 400);
+
+        let path = submission.bundle_path();
+        assert_eq!(path.to_string(), "2020/12/01/12/08/42/some_root.json.gz");
+    }
+
+    #[tokio::test]
+    async fn test_block_submission_compression() {
+        let payload =
+            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
+        let submission = BlockSubmission::new(100, payload, 200, 400);
+
+        let compressed_result = submission.compress().await;
+        assert!(compressed_result.is_ok());
+    }
+
+    #[test]
+    fn test_block_submission_from_redis() {
+        let mut map = HashMap::new();
+        map.insert("eligible_at".to_string(), Bytes::from("100"));
+        map.insert("payload".to_string(), Bytes::from("{\"message\": {\"slot\": \"42\"}, \"execution_payload\": {\"state_root\": \"some_root\"}}"));
+        map.insert("received_at".to_string(), Bytes::from("200"));
+        map.insert("status_code".to_string(), Bytes::from("400"));
+
+        let mut redis_map = RedisMap::new();
+        redis_map.insert("eligible_at".into(), RedisValue::String("100".into()));
+        redis_map.insert(
+            "payload".into(),
+            RedisValue::String(
+                "{\"message\": {\"slot\": \"42\"}, \"execution_payload\": {\"state_root\": \"some_root\"}}"
+                    .into(),
+            ),
+        );
+        redis_map.insert("received_at".into(), RedisValue::String("200".into()));
+        redis_map.insert("status_code".into(), RedisValue::String("400".into()));
+        let value: RedisValue = RedisValue::Map(redis_map);
+        let result = BlockSubmission::from_value(value);
+
+        assert!(result.is_ok());
+        let submission = result.unwrap();
+        assert_eq!(submission.eligible_at, 100);
+        assert_eq!(submission.received_at, 200);
+        assert_eq!(submission.status_code, Some(400));
+    }
+}
