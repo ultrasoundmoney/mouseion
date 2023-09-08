@@ -121,10 +121,10 @@ async fn main() -> Result<()> {
         }
 
         let raw_block_submission = read_file(decompressed_path)?;
-        let archive_entry: BlockSubmission = serde_json::from_str(&raw_block_submission)?;
+        let block_submission: BlockSubmission = serde_json::from_str(&raw_block_submission)?;
 
         client
-            .xadd(STREAM_NAME, false, None, "*", archive_entry)
+            .xadd(STREAM_NAME, false, None, "*", block_submission)
             .await?;
 
         debug!(%state_root, "simulated block submission");

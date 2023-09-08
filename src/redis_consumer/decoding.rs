@@ -30,7 +30,7 @@ impl FromRedis for XReadGroupResponse {
                     .expect("expect messages at index 1")
                     .into_array();
 
-                let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
+                let mut id_block_submissions = Vec::with_capacity(messages.len());
 
                 for message in messages {
                     let mut iter = message.into_array().into_iter();
@@ -41,13 +41,13 @@ impl FromRedis for XReadGroupResponse {
                         .unwrap();
                     let entry: BlockSubmission = iter
                         .next()
-                        .expect("expected index 1 to be archive entry")
+                        .expect("expected index 1 to be block submission")
                         .convert()
                         .unwrap();
-                    id_archive_entry_pairs.push((id, entry));
+                    id_block_submissions.push((id, entry));
                 }
 
-                Ok(Self(Some(id_archive_entry_pairs)))
+                Ok(Self(Some(id_block_submissions)))
             }
             RedisValue::Null => Ok(Self(None)),
             _ => Err(RedisError::new(
@@ -88,7 +88,7 @@ impl FromRedis for XAutoClaimResponse {
         //
         // In Redis v7, these messages are automatically deleted from the pending entries list and
         // their IDs are returned as a third value.
-        let mut id_archive_entry_pairs = Vec::with_capacity(messages.len());
+        let mut id_block_submissions = Vec::with_capacity(messages.len());
         for message in messages {
             match message {
                 RedisValue::Null => {
@@ -96,19 +96,19 @@ impl FromRedis for XAutoClaimResponse {
                     continue;
                 }
                 message => {
-                    let id_archive_pair = {
+                    let id_block_submission = {
                         let mut iter = message.into_array().into_iter();
                         let id: String = iter.next().expect("expected id at index 0").convert()?;
                         let entry: BlockSubmission =
                             iter.next().expect("expected entry at index 1").convert()?;
                         (id, entry)
                     };
-                    id_archive_entry_pairs.push(id_archive_pair);
+                    id_block_submissions.push(id_block_submission);
                 }
             }
         }
 
-        Ok(Self(next_autoclaim_id, id_archive_entry_pairs))
+        Ok(Self(next_autoclaim_id, id_block_submissions))
     }
 }
 

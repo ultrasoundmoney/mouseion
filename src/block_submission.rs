@@ -52,7 +52,7 @@ impl FromRedis for BlockSubmission {
         let eligible_at = {
             let bytes = map
                 .remove("eligible_at")
-                .expect("expect eligible_at in archive entry")
+                .expect("expect eligible_at in block submission")
                 .to_vec();
             let str = String::from_utf8(bytes)?;
             str.parse::<i64>()?
@@ -60,7 +60,7 @@ impl FromRedis for BlockSubmission {
         let received_at = {
             let bytes = map
                 .remove("received_at")
-                .expect("expect received_at in archive entry")
+                .expect("expect received_at in block submission")
                 .to_vec();
             let str = String::from_utf8(bytes)?;
             str.parse::<u64>()?
@@ -68,12 +68,12 @@ impl FromRedis for BlockSubmission {
         let payload = {
             let bytes = map
                 .remove("payload")
-                .expect("expect payload in archive entry")
+                .expect("expect payload in block submission")
                 .to_vec();
             // We could implement custom Deserialize for this to avoid parsing the JSON here, we
             // don't do anything with it besides Serialize it later.
             serde_json::from_slice(&bytes)
-                .context("failed to parse archive entry payload as JSON")
+                .context("failed to parse block submission payload as JSON")
                 .map_err(|err| RedisError::new(RedisErrorKind::Parse, err.to_string()))?
         };
         Ok(Self {
@@ -135,7 +135,7 @@ impl BlockSubmission {
             uncompressed_size_kb = json_size_kb,
             compressed_size_kb = json_gz_size_kb,
             compression_ratio = compression_ratio_truncated,
-            "compressed block submission archive entry"
+            "compressed block submission"
         );
 
         Ok(json_gz)
