@@ -10,7 +10,7 @@ use object_store as object_store_lib;
 use object_store_lib::{
     aws::{AmazonS3, AmazonS3Builder},
     local::LocalFileSystem,
-    ObjectStore,
+    ObjectStore, RetryConfig,
 };
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::{debug, error, info};
@@ -28,6 +28,10 @@ fn build_s3_store() -> Result<AmazonS3> {
     let s3_bucket = &ENV_CONFIG.s3_bucket;
     let s3_store = AmazonS3Builder::from_env()
         .with_bucket_name(s3_bucket)
+        .with_retry(RetryConfig {
+            retry_timeout: std::time::Duration::from_secs(16),
+            ..RetryConfig::default()
+        })
         .build()?;
     Ok(s3_store)
 }
