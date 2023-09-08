@@ -37,8 +37,7 @@ impl RedisConsumerHealth {
 
 lazy_static! {
     static ref MAX_SILENCE_DURATION: Duration = match ENV_CONFIG.env {
-        Env::Dev => Duration::from_secs(60),
-        Env::Stag => Duration::from_secs(60),
+        Env::Dev | Env::Stag => Duration::from_secs(60),
         Env::Prod => Duration::from_secs(24),
     };
 }
