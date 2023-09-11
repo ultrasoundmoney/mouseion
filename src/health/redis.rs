@@ -1,17 +1,14 @@
-use fred::{
-    prelude::{ClientLike, RedisClient},
-    types::ClientState,
-};
+use fred::{pool::RedisPool, prelude::ClientLike, types::ClientState};
 
 use super::HealthCheck;
 
 #[derive(Clone)]
 pub struct RedisHealth {
-    redis: RedisClient,
+    redis: RedisPool,
 }
 
 impl RedisHealth {
-    pub fn new(redis: RedisClient) -> Self {
+    pub fn new(redis: RedisPool) -> Self {
         Self { redis }
     }
 }

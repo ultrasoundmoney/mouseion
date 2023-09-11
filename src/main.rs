@@ -23,22 +23,14 @@ use block_submission_archiver::{
     env::{self, ENV_CONFIG},
     log, BlockSubmission,
 };
-use fred::{
-    prelude::{ClientLike, RedisClient},
-    types::RedisConfig,
-};
+use fred::{pool::RedisPool, types::RedisConfig};
 use futures::channel::mpsc::{self};
 use health::{RedisConsumerHealth, RedisHealth};
 use redis_consumer::IdBlockSubmission;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, trace};
 
-use crate::{
-    compression::IdBlockSubmissionCompressed, performance::BlockCounter,
-    redis_consumer::RedisConsumer,
-};
-
-const GROUP_NAME: &str = "default-group";
+use crate::{compression::IdBlockSubmissionCompressed, performance::BlockCounter};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -83,40 +75,39 @@ async fn main() -> Result<()> {
 
     // Set up the shared Redis client.
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
-    let redis_client = RedisClient::new(config, None, None);
-    redis_client.connect();
-    redis_client
+    // We use a pool of 3 connections to make sure new, pending, and ack redis consumer components
+    // can all run concurrently.
+    let redis_pool = RedisPool::new(config, None, None, 3)?;
+    redis_pool.connect();
+    redis_pool
         .wait_for_connect()
         .await
-        .context("failed to connect to Redis")?;
+        .context("failed to connect to redis")?;
 
     // Initialize health check components.
-    let redis_health = RedisHealth::new(redis_client.clone());
+    let redis_health = RedisHealth::new(redis_pool.clone());
     let redis_consumer_health = RedisConsumerHealth::new();
 
-    // The Redis consumer is responsible for pulling in new messages and claiming pending messages.
-    // It also acknowledges messages which have been successfully stored.
-    let redis_consumer = Arc::new(RedisConsumer::new(
-        redis_client.clone(),
-        redis_consumer_health.clone(),
-        shutdown_notify.clone(),
-    ));
+    redis_consumer::ensure_consumer_group_exists(&redis_pool).await?;
 
-    redis_consumer.ensure_consumer_group_exists().await?;
-
-    redis_consumer.delete_dead_consumers().await?;
+    redis_consumer::delete_dead_consumers(&redis_pool).await?;
 
     const BLOCK_SUBMISSIONS_BUFFER_SIZE: usize = 32;
     let (submissions_tx, submissions_rx) =
         mpsc::channel::<IdBlockSubmission>(BLOCK_SUBMISSIONS_BUFFER_SIZE);
 
-    let new_messages_thread = redis_consumer
-        .clone()
-        .run_new_submissions_thread(submissions_tx.clone());
+    let new_messages_thread = redis_consumer::run_new_submissions_thread(
+        redis_pool.clone(),
+        redis_consumer_health.clone(),
+        shutdown_notify.clone(),
+        submissions_tx.clone(),
+    );
 
-    let pending_messages_thread = redis_consumer
-        .clone()
-        .run_pending_submissions_thread(submissions_tx);
+    let pending_messages_thread = redis_consumer::run_pending_submissions_thread(
+        redis_pool.clone(),
+        shutdown_notify.clone(),
+        submissions_tx,
+    );
 
     let (compressed_submissions_tx, compressed_submissions_rx) =
         mpsc::channel::<IdBlockSubmissionCompressed>(BLOCK_SUBMISSIONS_BUFFER_SIZE);
@@ -140,7 +131,11 @@ async fn main() -> Result<()> {
     );
 
     // The ack thread takes stored submissions and acknowledges them.
-    let ack_thread = redis_consumer.run_ack_submissions_thread(stored_submissions_rx);
+    let ack_thread = redis_consumer::run_ack_submissions_thread(
+        redis_pool,
+        shutdown_notify.clone(),
+        stored_submissions_rx,
+    );
 
     let app_state = AppState {
         redis_health,
