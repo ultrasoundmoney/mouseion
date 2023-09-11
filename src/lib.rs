@@ -1,9 +1,9 @@
-mod block_submission;
+mod block_submissions;
 pub mod env;
 pub mod log;
 pub mod units;
 
-pub use block_submission::BlockSubmission;
+pub use block_submissions::BlockSubmission;
 
 pub type JsonValue = serde_json::Value;
 
