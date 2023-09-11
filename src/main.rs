@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Set up the shared Redis client.
+    // Set up the shared Redis pool.
     let config = RedisConfig::from_url(&ENV_CONFIG.redis_uri)?;
     // We use a pool of 3 connections to make sure new, pending, and ack redis consumer components
     // can all run concurrently.
