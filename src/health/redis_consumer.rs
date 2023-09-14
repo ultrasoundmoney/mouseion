@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -11,22 +11,22 @@ use super::HealthCheck;
 
 #[derive(Debug, Clone)]
 pub struct RedisConsumerHealth {
-    last_message_received: Arc<RwLock<Option<Instant>>>,
+    last_message_received: Arc<Mutex<Option<Instant>>>,
     started_on: Instant,
 }
 
 impl RedisConsumerHealth {
     pub fn new() -> Self {
         Self {
-            last_message_received: Arc::new(RwLock::new(None)),
+            last_message_received: Arc::new(Mutex::new(None)),
             started_on: Instant::now(),
         }
     }
 
     fn set_last_message_received(&self, instant: Instant) {
         self.last_message_received
-            .write()
-            .expect("unable to write last message received")
+            .lock()
+            .expect("unable to lock last message received")
             .replace(instant);
     }
 
@@ -47,18 +47,11 @@ impl HealthCheck for RedisConsumerHealth {
         let now = Instant::now();
         let time_since_start = now - self.started_on;
 
-        // To avoid blocking the constant writes to this value we clone.
-        let last_message_received_clone = match self.last_message_received.read() {
-            Ok(last_message_received) => *last_message_received,
-            Err(_) => {
-                return (
-                    false,
-                    "unhealthy, unable to read last message received".to_string(),
-                )
-            }
-        };
-
-        let time_since_last_message = last_message_received_clone.map(|instant| now - instant);
+        let last_message_received = self
+            .last_message_received
+            .lock()
+            .expect("unable to lock last message received");
+        let time_since_last_message = last_message_received.map(|instant| now - instant);
 
         match time_since_last_message {
             None => {
