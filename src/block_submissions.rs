@@ -85,7 +85,11 @@ impl FromRedis for BlockSubmission {
                 Some(bytes) => {
                     let str = String::from_utf8(bytes.to_vec())?;
                     let status_code = str.parse::<u16>()?;
-                    Some(status_code)
+                    // If no status_code was set, go defaults to a zero.
+                    match status_code {
+                        0 => None,
+                        _ => Some(status_code),
+                    }
                 }
             }
         };
