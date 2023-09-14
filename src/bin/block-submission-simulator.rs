@@ -12,31 +12,7 @@ use fred::{
 };
 use tracing::{debug, info};
 
-fn decompress_gz_to_file(input_path: &str, output_path: &str) -> Result<(), std::io::Error> {
-    let input_file = File::open(input_path)?;
-    let decoder = GzDecoder::new(input_file);
-    let mut reader = BufReader::new(decoder);
-
-    let output_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output_path)?;
-
-    let mut writer = BufWriter::new(output_file);
-
-    std::io::copy(&mut reader, &mut writer)?;
-
-    Ok(())
-}
-
-fn read_file(file_path: &str) -> Result<String, std::io::Error> {
-    let mut file = File::open(file_path)?;
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
-    Ok(content)
-}
-
-const STATE_ROOTS: [&str; 55] = [
+const STATE_ROOTS: [&str; 87] = [
     "0x02fdf00bcdbc6f0d5e81ef481b86874ad3b92511c0f2a03745f9cd8d6bf35787",
     "0x03d3e1c595fcf840b5e3f342922068d724e34eb430a6678f8fff031ab4dd5d33",
     "0x05014e5e38db33abba9b336fe35bfb6db924cf7aa669afe32c4624008786b223",
@@ -92,7 +68,63 @@ const STATE_ROOTS: [&str; 55] = [
     "0xc084307e531c5178f3a3fdc10d03786728df867f25014d961e4491ab73bed690",
     "0xc4a818397eff6cbe74d53c695bd4ac0974fe3d28842c7368b88bfcc6a8205974",
     "0xca18d2cd142dd339ebca9d1abc4891c078119f389fd0577a7df7d4f4b2bfd87c",
+    "0x003fc7725acd9365420171d5768dda1d0dd28dc50ea15126f4a4db81b2cf3dfb",
+    "0x08272b1849eaea5e282835dd09e5bea4aa97ed722377e9deba77c933bb795cf0",
+    "0x2d4a30b5af8831d5d537ba44f4ae5b9b801d0d2638cd1ee76b14be4807485008",
+    "0x6fa16a576bccb38a4fce28fc491cdf23cae1c2f43baef6c4d5881a4ac6c623d2",
+    "0x8e97c3fcd691c84cae26146ac2b3e52285d5d5d476a6c7d6c4f6316a247ffb55",
+    "0x8f1046509a074afb1f5b68ba569b59c25d9be807c75b5c169f48bb791003c28d",
+    "0x25ebac6ca8f11529a2059a0d2b1587311e5251ec0d9c1cb502e50f9d4241dcd2",
+    "0x44e394e556f53972a17a1ccc97c8a52666be5f079c8109e0cad9028336300e1b",
+    "0x84e72748640abddfea5bd6cd4eeebb1a28b719b806104651810c2d7c24461564",
+    "0x184fc76f70d8ec826c227d3f78c7da70b0fd86d4cbad6ee003c9090a9d21a497",
+    "0x222b573e8f3d580c6e460f898b2db8e23a765ae4a44b61bc514b306b9412f6be",
+    "0x246e67217a0ce7a783275eafe9ed7198a97710466bd40e2ae91d1342b725aa69",
+    "0x481ff3577552ca2edd1221b2c00a3ed12109638bc22d63fdbbd9907111db321a",
+    "0x716a6496ff13621dbd3383a2272e737d2579f5aa9262ff391dc430e3882d1a4f",
+    "0x968c951bdabbebdc8b09ae0c04dad391a801039267a84ff90501a7c04e9a5095",
+    "0x46439af3bccd4666d517f9cbb4673e44f1888fa9a8d0785acf12c862bcc1621b",
+    "0x62019eca17cc66f85b1aab3eada683a73bf93b66090622c49c21dfad9a508468",
+    "0x1220127eb2e1c71b6797546d93491e7cbc29befc559c2ff6b4205370719735cd",
+    "0x2603401a9651155fb9847fb6855ef3b79d59b742dc7967e4f274af32478386f9",
+    "0xabb8525a5b37f80bbef560bed6e8c04dd96e766a001fdd6950db1a71cc1cc75d",
+    "0xaeec32e0be1c65b28648bc5b987934023c202a60abb8a4bab0029f190b86c7e5",
+    "0xb2b49fa11a4b75304c29780a1d060f1f984fa97ba7d99dfaadfb7e099a9dd996",
+    "0xbe8ec96373c34ef3aed25c598dbd3e55e7b588711bf0b17280bedf2d5dfd0819",
+    "0xc1f78dc8c96c307121c3919dc2981becf81c848582e3468850c50f95f4d0984d",
+    "0xcbf8204de7d89dc76b63ceb65b44dfc485a65cdafe4c61c6142f7e6bdfb67ca0",
+    "0xe6f8296dc2dc48affb8917981b5d350d905837f389ce48c0c68567777f8322fe",
+    "0xe8621f3a85d190d91c6f012c4d4f088d6b205771a4395d46f05ccd7d05a55a39",
+    "0xef97837e8ba94a53cb3da0e8913b7a7c4d81ad0f29ef9ed19d1ac00942f20a23",
+    "0xf46afaa90c0de08d293476b9b92f0cbef02f35f1fbd090b6d4a5576f388d0533",
+    "0xf94b40bdfcf3ecfe1867df059f7b94924a5153e4e9a484cdb9220854f14bdd75",
+    "0xf574ef527d30d5c8416b7b7934f9e6cd5bb5f514d412fb392764b3223225f676",
+    "0xf3121bf6f5a409dffe1c4c111111046c5465ab6733f1bc20bcef539fa6670bf6",
 ];
+
+fn decompress_gz_to_file(input_path: &str, output_path: &str) -> Result<(), std::io::Error> {
+    let input_file = File::open(input_path)?;
+    let decoder = GzDecoder::new(input_file);
+    let mut reader = BufReader::new(decoder);
+
+    let output_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output_path)?;
+
+    let mut writer = BufWriter::new(output_file);
+
+    std::io::copy(&mut reader, &mut writer)?;
+
+    Ok(())
+}
+
+fn read_file(file_path: &str) -> Result<String, std::io::Error> {
+    let mut file = File::open(file_path)?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
+    Ok(content)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {

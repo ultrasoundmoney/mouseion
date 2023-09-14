@@ -6,7 +6,7 @@ use chrono::{Datelike, Timelike};
 use flate2::{write::GzEncoder, Compression};
 use fred::{
     prelude::{RedisError, RedisErrorKind},
-    types::{FromRedis, MultipleOrderedPairs, RedisValue},
+    types::{FromRedis, MultipleOrderedPairs, RedisKey, RedisValue},
 };
 use object_store::path::Path;
 use serde::{Deserialize, Serialize};
@@ -38,10 +38,14 @@ impl std::fmt::Debug for BlockSubmission {
 
 impl From<BlockSubmission> for MultipleOrderedPairs {
     fn from(entry: BlockSubmission) -> Self {
-        let pairs: Vec<(String, String)> = vec![
-            ("eligible_at".into(), entry.eligible_at.to_string()),
-            ("payload".into(), entry.payload.to_string()),
-            ("received_at".into(), entry.received_at.to_string()),
+        let pairs: Vec<(RedisKey, RedisValue)> = vec![
+            ("eligible_at".into(), RedisValue::Integer(entry.eligible_at)),
+            (
+                "payload".into(),
+                RedisValue::String(entry.payload.to_string().into()),
+            ),
+            ("received_at".into(), (entry.received_at as i64).into()),
+            ("status_code".into(), entry.status_code.unwrap_or(0).into()),
         ];
         pairs.try_into().unwrap()
     }
