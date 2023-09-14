@@ -16,15 +16,11 @@ trait HealthCheck {
 
 pub async fn get_livez(State(state): State<AppState>) -> impl IntoResponse {
     let (is_redis_healthy, redis_health_status) = state.redis_health.health_status();
-    // We check but don't count message health. Messages should be continuously coming in on
-    // production. Until we know whether that is reliable we don't want to fail the health
-    // check.
-    let (_is_messages_healthy, messages_health_status) =
-        state.redis_consumer_health.health_status();
+    let (is_messages_healthy, messages_health_status) = state.redis_consumer_health.health_status();
 
     let message = json!({ "redis": redis_health_status, "messages": messages_health_status });
 
-    if is_redis_healthy {
+    if is_redis_healthy && is_messages_healthy {
         debug!(
             redis = redis_health_status,
             messages = messages_health_status
