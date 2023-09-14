@@ -38,9 +38,9 @@ pub async fn serve(state: AppState, shutdown_notify: &Notify) {
     };
 
     match result {
-        Ok(_) => info!("server exited"),
+        Ok(_) => info!("server thread exiting"),
         Err(e) => {
-            error!(%e, "server exited with error");
+            error!(%e, "server thread hit error, exiting");
             shutdown_notify.notify_waiters();
         }
     }
