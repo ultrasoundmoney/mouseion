@@ -5,8 +5,6 @@ use std::{
 
 use lazy_static::lazy_static;
 
-use crate::env::{Env, ENV_CONFIG};
-
 use super::HealthCheck;
 
 #[derive(Debug, Clone)]
@@ -36,10 +34,7 @@ impl RedisConsumerHealth {
 }
 
 lazy_static! {
-    static ref MAX_SILENCE_DURATION: Duration = match ENV_CONFIG.env {
-        Env::Dev | Env::Stag => Duration::from_secs(60),
-        Env::Prod => Duration::from_secs(24),
-    };
+    static ref MAX_SILENCE_DURATION: Duration = Duration::from_secs(60);
 }
 
 impl HealthCheck for RedisConsumerHealth {
@@ -67,7 +62,7 @@ impl HealthCheck for RedisConsumerHealth {
                     (
                         true,
                         format!(
-                            "healthy, started {} seconds ago, waiting for first message until {}",
+                            "healthy, started {} seconds ago, waiting for first message until {} seconds have passed",
                             time_since_start.as_secs(),
                             MAX_SILENCE_DURATION.as_secs(),
                         ),
