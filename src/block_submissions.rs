@@ -19,9 +19,14 @@ use crate::units::Slot;
 /// These are block submissions as they came in on the relay, plus some metadata.
 #[derive(Deserialize, Serialize)]
 pub struct BlockSubmission {
-    eligible_at: i64,
+    // Not every block submission becomes eligible, so this field is optional.
+    // TODO: Once builder-api deploys a fix to omit eligible_at when unavailable instead of giving
+    // us negative values, this may be set to u64.
+    pub eligible_at: Option<i64>,
     payload: serde_json::Value,
-    received_at: u64,
+    pub received_at: u64,
+    // A status code is not always available. Both historically, and because builder-api doesn't
+    // always provide one.
     status_code: Option<u16>,
 }
 
@@ -38,30 +43,45 @@ impl std::fmt::Debug for BlockSubmission {
 
 impl From<BlockSubmission> for MultipleOrderedPairs {
     fn from(entry: BlockSubmission) -> Self {
-        let pairs: Vec<(RedisKey, RedisValue)> = vec![
-            ("eligible_at".into(), RedisValue::Integer(entry.eligible_at)),
+        let mut pairs: Vec<(RedisKey, RedisValue)> = vec![
             (
                 "payload".into(),
                 RedisValue::String(entry.payload.to_string().into()),
             ),
             ("received_at".into(), (entry.received_at as i64).into()),
-            ("status_code".into(), entry.status_code.unwrap_or(0).into()),
         ];
+        if let Some(eligible_at) = entry.eligible_at {
+            pairs.push(("eligible_at".into(), eligible_at.into()));
+        }
+        if let Some(status_code) = entry.status_code {
+            pairs.push(("status_code".into(), (status_code as i64).into()));
+        }
         pairs.try_into().unwrap()
     }
+}
+
+fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
+    RedisError::new(RedisErrorKind::Parse, err.to_string())
 }
 
 impl FromRedis for BlockSubmission {
     fn from_value(value: RedisValue) -> Result<Self, RedisError> {
         let mut map: HashMap<String, Bytes> = value.convert()?;
-        let eligible_at = {
-            let bytes = map
-                .remove("eligible_at")
-                .expect("expect eligible_at in block submission")
-                .to_vec();
-            let str = String::from_utf8(bytes)?;
-            str.parse::<i64>()?
-        };
+        let eligible_at = match map.remove("eligible_at") {
+            Some(bytes) => {
+                let str = std::str::from_utf8(&bytes).map_err(|e| {
+                    into_redis_parse_err(format!(
+                        "failed to convert eligible_at bytes to str: {}",
+                        e
+                    ))
+                })?;
+                let num = str.parse::<i64>().map_err(|e| {
+                    into_redis_parse_err(format!("failed to parse eligible_at str as i64: {}", e))
+                })?;
+                Ok::<_, RedisError>(Some(num))
+            }
+            None => Ok(None),
+        }?;
         let received_at = {
             let bytes = map
                 .remove("received_at")
@@ -81,22 +101,24 @@ impl FromRedis for BlockSubmission {
                 .context("failed to parse block submission payload as JSON")
                 .map_err(|err| RedisError::new(RedisErrorKind::Parse, err.to_string()))?
         };
-        let status_code = {
-            let status_code_bytes = map.remove("status_code");
-            // Until the builder-api is updated to match we allow this to be missing.
-            match status_code_bytes {
-                None => None,
-                Some(bytes) => {
-                    let str = String::from_utf8(bytes.to_vec())?;
-                    let status_code = str.parse::<u16>()?;
-                    // If no status_code was set, go defaults to a zero.
-                    match status_code {
-                        0 => None,
-                        _ => Some(status_code),
-                    }
+        // TODO: once builder-api is updated to omit the code entirely when not available we can
+        // remove the special case for the 0 value.
+        let status_code = match map.remove("status_code") {
+            Some(bytes) => {
+                let str = std::str::from_utf8(&bytes).map_err(|e| {
+                    into_redis_parse_err(format!(
+                        "failed to convert eligible_at bytes to str: {}",
+                        e
+                    ))
+                })?;
+                let status_code = str.parse::<u16>()?;
+                match status_code {
+                    0 => Ok::<_, RedisError>(None),
+                    _ => Ok::<_, RedisError>(Some(status_code)),
                 }
             }
-        };
+            None => Ok(None),
+        }?;
         Ok(Self {
             eligible_at,
             payload,
@@ -108,7 +130,7 @@ impl FromRedis for BlockSubmission {
 
 impl BlockSubmission {
     pub fn new(
-        eligible_at: i64,
+        eligible_at: Option<i64>,
         payload: serde_json::Value,
         received_at: u64,
         status_code: u16,
@@ -194,9 +216,9 @@ mod tests {
     fn create_block_submission() {
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(100, payload.clone(), 200, 400);
+        let submission = BlockSubmission::new(Some(100), payload.clone(), 200, 400);
 
-        assert_eq!(submission.eligible_at, 100);
+        assert_eq!(submission.eligible_at, Some(100));
         assert_eq!(submission.payload, payload);
         assert_eq!(submission.received_at, 200);
         assert_eq!(submission.status_code, Some(400));
@@ -213,7 +235,7 @@ mod tests {
         }
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(100, payload, 200, 400);
+        let submission = BlockSubmission::new(Some(100), payload, 200, 400);
 
         let path = submission.bundle_path();
         assert_eq!(path.to_string(), "2020/12/01/12/08/42/some_root.json.gz");
@@ -223,7 +245,7 @@ mod tests {
     async fn test_block_submission_compression() {
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(100, payload, 200, 400);
+        let submission = BlockSubmission::new(Some(100), payload, 200, 400);
 
         let compressed_result = submission.compress().await;
         assert!(compressed_result.is_ok());
@@ -253,7 +275,7 @@ mod tests {
 
         assert!(result.is_ok());
         let submission = result.unwrap();
-        assert_eq!(submission.eligible_at, 100);
+        assert_eq!(submission.eligible_at, Some(100));
         assert_eq!(submission.received_at, 200);
         assert_eq!(submission.status_code, Some(400));
     }
