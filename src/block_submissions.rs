@@ -88,7 +88,7 @@ impl FromRedis for BlockSubmission {
         let received_at = {
             let bytes = map
                 .remove("received_at")
-                .expect("expect received_at in block submission")
+                .ok_or_else(|| into_redis_parse_err("expected received_at in block submission"))?
                 .to_vec();
             let str = std::str::from_utf8(&bytes).map_err(|err| {
                 into_redis_parse_err(format!(
@@ -106,7 +106,7 @@ impl FromRedis for BlockSubmission {
         let payload = {
             let bytes = map
                 .remove("payload")
-                .expect("expect payload in block submission")
+                .ok_or_else(|| into_redis_parse_err("expected payload in block submission"))?
                 .to_vec();
             // We could implement custom Deserialize for this to avoid parsing the JSON here, we
             // don't do anything with it besides Serialize it later.

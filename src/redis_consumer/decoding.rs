@@ -6,6 +6,10 @@ use fred::{
 };
 use tracing::{debug, trace};
 
+fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
+    RedisError::new(RedisErrorKind::Parse, err.to_string())
+}
+
 pub struct XReadGroupResponse(pub Option<Vec<(String, BlockSubmission)>>);
 
 impl FromRedis for XReadGroupResponse {
@@ -16,28 +20,39 @@ impl FromRedis for XReadGroupResponse {
                 let stream = streams
                     .into_iter()
                     .next()
-                    .expect("expect non-empty array of streams in non-nil XREADGROUP response")
+                    .ok_or_else(|| {
+                        into_redis_parse_err(
+                            "expected non-empty array of streams in non-nil XREADGROUP response",
+                        )
+                    })?
                     .into_array();
 
                 let mut iter = stream.into_iter();
 
                 // Index 0 is stream name, index 1 is messages.
-                let stream_name = iter.next().expect("expect stream name at index 0");
+                let stream_name = iter.next().ok_or_else(|| {
+                    into_redis_parse_err("expected stream name at index 0 in XREADGROUP response")
+                })?;
                 assert_eq!(stream_name, RedisValue::String(STREAM_NAME.into()));
 
                 let messages = iter
                     .next()
-                    .expect("expect messages at index 1")
+                    .ok_or_else(|| into_redis_parse_err("expected messages at index 1"))?
                     .into_array();
 
                 let mut id_block_submissions = Vec::with_capacity(messages.len());
 
                 for message in messages {
                     let mut iter = message.into_array().into_iter();
-                    let id: String = iter.next().expect("expected index 0 to be id").convert()?;
+                    let id: String = iter
+                        .next()
+                        .ok_or_else(|| into_redis_parse_err("expected index 0 to be id"))?
+                        .convert()?;
                     let entry: BlockSubmission = iter
                         .next()
-                        .expect("expected index 1 to be block submission")
+                        .ok_or_else(|| {
+                            into_redis_parse_err("expected index 1 to be block submission")
+                        })?
                         .convert()?;
                     id_block_submissions.push((id, entry));
                 }
@@ -45,9 +60,8 @@ impl FromRedis for XReadGroupResponse {
                 Ok(Self(Some(id_block_submissions)))
             }
             RedisValue::Null => Ok(Self(None)),
-            _ => Err(RedisError::new(
-                RedisErrorKind::Parse,
-                "expected array containing streams",
+            _ => Err(into_redis_parse_err(
+                "expected XREADGROUP response to be array or nil",
             )),
         }
     }
@@ -61,11 +75,11 @@ impl FromRedis for XAutoClaimResponse {
         let mut iter = value.into_array().into_iter();
         let next_autoclaim_id = iter
             .next()
-            .expect("expect autoclaim_id at index 0")
+            .ok_or_else(|| into_redis_parse_err("expected autoclaim_id at index 0"))?
             .convert()?;
         let messages = iter
             .next()
-            .expect("expected message at index 1")
+            .ok_or_else(|| into_redis_parse_err("expected message at index 1"))?
             .into_array();
 
         // Messages which are consumed move into the consumer's pending entries list. In rare cases
@@ -93,9 +107,14 @@ impl FromRedis for XAutoClaimResponse {
                 message => {
                     let id_block_submission = {
                         let mut iter = message.into_array().into_iter();
-                        let id: String = iter.next().expect("expected id at index 0").convert()?;
-                        let entry: BlockSubmission =
-                            iter.next().expect("expected entry at index 1").convert()?;
+                        let id: String = iter
+                            .next()
+                            .ok_or_else(|| into_redis_parse_err("expected id at index 0"))?
+                            .convert()?;
+                        let entry: BlockSubmission = iter
+                            .next()
+                            .ok_or_else(|| into_redis_parse_err("expected entry at index 1"))?
+                            .convert()?;
                         (id, entry)
                     };
                     id_block_submissions.push(id_block_submission);
@@ -120,27 +139,23 @@ impl FromRedis for ConsumerInfo {
 
         let idle = info
             .get(&RedisKey::from_static_str("idle"))
-            .ok_or_else(|| RedisError::new(RedisErrorKind::Parse, "expected idle field to exist"))?
+            .ok_or_else(|| into_redis_parse_err("expected 'idle' field to exist in ConsumerInfo"))?
             .as_u64()
-            .ok_or_else(|| {
-                RedisError::new(RedisErrorKind::Parse, "expected idle field to be a u64")
-            })?;
+            .ok_or_else(|| into_redis_parse_err("expected 'idle' field to be a u64"))?;
 
         let name = info
             .get(&RedisKey::from_static_str("name"))
-            .ok_or_else(|| RedisError::new(RedisErrorKind::Parse, "expected name field to exist"))?
+            .ok_or_else(|| into_redis_parse_err("expected 'name' field to exist in ConsumerInfo"))?
             .as_string()
-            .ok_or_else(|| {
-                RedisError::new(RedisErrorKind::Parse, "expected name field to be a string")
-            })?;
+            .ok_or_else(|| into_redis_parse_err("expected 'name' field to be a string"))?;
 
         let pending = info
             .get(&RedisKey::from_static_str("pending"))
-            .expect("expect pending field")
-            .as_u64()
             .ok_or_else(|| {
-                RedisError::new(RedisErrorKind::Parse, "expected pending field to be a u64")
-            })?;
+                into_redis_parse_err("expected 'pending' field to exist in ConsumerInfo")
+            })?
+            .as_u64()
+            .ok_or_else(|| into_redis_parse_err("expected 'pending' field to be a u64"))?;
 
         Ok(Self {
             idle,
