@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::Write};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use chrono::{Datelike, Timelike};
 use flate2::{write::GzEncoder, Compression};
@@ -69,14 +69,17 @@ impl FromRedis for BlockSubmission {
         let mut map: HashMap<String, Bytes> = value.convert()?;
         let eligible_at = match map.remove("eligible_at") {
             Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|e| {
+                let str = std::str::from_utf8(&bytes).map_err(|err| {
                     into_redis_parse_err(format!(
-                        "failed to convert eligible_at bytes to str: {}",
-                        e
+                        "failed to convert eligible_at bytes to str, {}",
+                        err
                     ))
                 })?;
                 let num = str.parse::<i64>().map_err(|e| {
-                    into_redis_parse_err(format!("failed to parse eligible_at str as i64: {}", e))
+                    into_redis_parse_err(format!(
+                        "failed to parse eligible_at str as i64, {}, str: {}",
+                        e, str
+                    ))
                 })?;
                 Ok::<_, RedisError>(Some(num))
             }
@@ -87,8 +90,18 @@ impl FromRedis for BlockSubmission {
                 .remove("received_at")
                 .expect("expect received_at in block submission")
                 .to_vec();
-            let str = String::from_utf8(bytes)?;
-            str.parse::<u64>()?
+            let str = std::str::from_utf8(&bytes).map_err(|err| {
+                into_redis_parse_err(format!(
+                    "failed to convert received_at bytes to str, {}",
+                    err
+                ))
+            })?;
+            str.parse::<u64>().map_err(|err| {
+                into_redis_parse_err(format!(
+                    "failed to parse received_at str as u64, {}, str: {}",
+                    err, str
+                ))
+            })?
         };
         let payload = {
             let bytes = map
@@ -97,25 +110,30 @@ impl FromRedis for BlockSubmission {
                 .to_vec();
             // We could implement custom Deserialize for this to avoid parsing the JSON here, we
             // don't do anything with it besides Serialize it later.
-            serde_json::from_slice(&bytes)
-                .context("failed to parse block submission payload as JSON")
-                .map_err(|err| RedisError::new(RedisErrorKind::Parse, err.to_string()))?
+            serde_json::from_slice(&bytes).map_err(|err| {
+                into_redis_parse_err(format!(
+                    "failed to parse payload bytes as serde_json Value, {}",
+                    err
+                ))
+            })?
         };
         // TODO: once builder-api is updated to omit the code entirely when not available we can
         // remove the special case for the 0 value.
         let status_code = match map.remove("status_code") {
             Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|e| {
+                let str = std::str::from_utf8(&bytes).map_err(|err| {
                     into_redis_parse_err(format!(
                         "failed to convert eligible_at bytes to str: {}",
-                        e
+                        err
                     ))
                 })?;
-                let status_code = str.parse::<u16>()?;
-                match status_code {
-                    0 => Ok::<_, RedisError>(None),
-                    _ => Ok::<_, RedisError>(Some(status_code)),
-                }
+                let status_code = str.parse::<u16>().map_err(|err| {
+                    into_redis_parse_err(format!(
+                        "failed to parse status_code as u16: {}, {}",
+                        err, str
+                    ))
+                })?;
+                Ok::<_, RedisError>(Some(status_code))
             }
             None => Ok(None),
         }?;
@@ -171,7 +189,7 @@ impl BlockSubmission {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(json_str.as_bytes())?;
             let json_gz = encoder.finish()?.into();
-            anyhow::Ok(json_gz)
+            Ok::<_, RedisError>(json_gz)
         })
         .await??;
         let json_gz_size_kb = json_gz.len() / 1000;

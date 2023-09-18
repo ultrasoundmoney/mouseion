@@ -1,5 +1,4 @@
 //! Decodes Redis bytes into Rust types.
-use anyhow::Context;
 use block_submission_archiver::{BlockSubmission, STREAM_NAME};
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
@@ -35,17 +34,11 @@ impl FromRedis for XReadGroupResponse {
 
                 for message in messages {
                     let mut iter = message.into_array().into_iter();
-                    let id: String = iter
-                        .next()
-                        .expect("expected index 0 to be id")
-                        .convert()
-                        .unwrap();
+                    let id: String = iter.next().expect("expected index 0 to be id").convert()?;
                     let entry: BlockSubmission = iter
                         .next()
                         .expect("expected index 1 to be block submission")
-                        .convert()
-                        .context("failed to decode BlockSubmission from RedisValue")
-                        .unwrap();
+                        .convert()?;
                     id_block_submissions.push((id, entry));
                 }
 
