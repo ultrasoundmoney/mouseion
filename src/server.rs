@@ -17,7 +17,8 @@ pub async fn serve(state: AppState, shutdown_notify: &Notify) {
             .with_state(state);
 
         let address = match ENV_CONFIG.env {
-            // This avoids macOS firewall popups when developing locally.
+            // Developing locally we don't want to expose our server to the world.
+            // This also avoids the macOS firewall prompt.
             Env::Dev => "127.0.0.1",
             Env::Stag | Env::Prod => "0.0.0.0",
         };
