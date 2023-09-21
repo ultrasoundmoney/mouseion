@@ -95,8 +95,8 @@ pub fn run_pending_submissions_thread(
                         error!("pending submissions thread exited unexpectedly");
                         shutdown_notify.notify_waiters();
                     }
-                    Err(err) => {
-                        error!(?err, "failed to pull pending submissions");
+                    Err(e) => {
+                        error!(?e, "failed to pull pending submissions");
                         shutdown_notify.notify_waiters();
                     }
                 }

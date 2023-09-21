@@ -26,7 +26,7 @@ fn obfuscate_if_secret(blacklist: &[&str], key: &str, value: &str) -> String {
 pub fn get_env_var(key: &str) -> Option<String> {
     let var = match env::var(key) {
         Err(env::VarError::NotPresent) => None,
-        Err(err) => panic!("{err}"),
+        Err(e) => panic!("{e}"),
         Ok(var) => Some(var),
     };
 

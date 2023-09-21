@@ -69,10 +69,10 @@ impl FromRedis for BlockSubmission {
         let mut map: HashMap<String, Bytes> = value.convert()?;
         let eligible_at = match map.remove("eligible_at") {
             Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|err| {
+                let str = std::str::from_utf8(&bytes).map_err(|e| {
                     into_redis_parse_err(format!(
                         "failed to convert eligible_at bytes to str, {}",
-                        err
+                        e
                     ))
                 })?;
                 let num = str.parse::<i64>().map_err(|e| {
@@ -90,16 +90,13 @@ impl FromRedis for BlockSubmission {
                 .remove("received_at")
                 .ok_or_else(|| into_redis_parse_err("expected received_at in block submission"))?
                 .to_vec();
-            let str = std::str::from_utf8(&bytes).map_err(|err| {
-                into_redis_parse_err(format!(
-                    "failed to convert received_at bytes to str, {}",
-                    err
-                ))
+            let str = std::str::from_utf8(&bytes).map_err(|e| {
+                into_redis_parse_err(format!("failed to convert received_at bytes to str, {}", e))
             })?;
-            str.parse::<u64>().map_err(|err| {
+            str.parse::<u64>().map_err(|e| {
                 into_redis_parse_err(format!(
                     "failed to parse received_at str as u64, {}, str: {}",
-                    err, str
+                    e, str
                 ))
             })?
         };
@@ -110,10 +107,10 @@ impl FromRedis for BlockSubmission {
                 .to_vec();
             // We could implement custom Deserialize for this to avoid parsing the JSON here, we
             // don't do anything with it besides Serialize it later.
-            serde_json::from_slice(&bytes).map_err(|err| {
+            serde_json::from_slice(&bytes).map_err(|e| {
                 into_redis_parse_err(format!(
                     "failed to parse payload bytes as serde_json Value, {}",
-                    err
+                    e
                 ))
             })?
         };
@@ -121,16 +118,16 @@ impl FromRedis for BlockSubmission {
         // remove the special case for the 0 value.
         let status_code = match map.remove("status_code") {
             Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|err| {
+                let str = std::str::from_utf8(&bytes).map_err(|e| {
                     into_redis_parse_err(format!(
                         "failed to convert eligible_at bytes to str: {}",
-                        err
+                        e
                     ))
                 })?;
-                let status_code = str.parse::<u16>().map_err(|err| {
+                let status_code = str.parse::<u16>().map_err(|e| {
                     into_redis_parse_err(format!(
                         "failed to parse status_code as u16: {}, {}",
-                        err, str
+                        e, str
                     ))
                 })?;
                 Ok::<_, RedisError>(Some(status_code))
