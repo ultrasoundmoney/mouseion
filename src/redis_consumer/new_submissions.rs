@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use block_submission_archiver::{BlockSubmission, STREAM_NAME};
 use fred::{pool::RedisPool, prelude::StreamsInterface};
 use futures::{channel::mpsc::Sender, select, FutureExt, SinkExt};
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::{debug, error, info};
 
-use crate::health::RedisConsumerHealth;
+use crate::{health::RedisConsumerHealth, BlockSubmission, STREAM_NAME};
 
 use super::{
     decoding::XReadGroupResponse, IdBlockSubmission, BLOCK_DURATION_MS, CONSUMER_ID, GROUP_NAME,
@@ -62,8 +61,9 @@ impl NewSubmissionRedisConsumer {
                     self.message_health.set_last_message_received_now();
 
                     for id_block_submission in id_block_submissions {
-                        submissions_tx.send(id_block_submission).await?;
+                        submissions_tx.feed(id_block_submission).await?;
                     }
+                    submissions_tx.flush().await?;
                 }
                 None => {
                     debug!("block submissions stream empty");

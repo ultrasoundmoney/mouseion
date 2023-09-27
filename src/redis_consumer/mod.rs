@@ -15,7 +15,6 @@ pub use new_submissions::run_new_submissions_thread;
 pub use pending_submissions::run_pending_submissions_thread;
 
 use anyhow::{bail, Result};
-use block_submission_archiver::{env::ENV_CONFIG, BlockSubmission, STREAM_NAME};
 use fred::{
     pool::RedisPool,
     prelude::{RedisResult, StreamsInterface},
@@ -25,6 +24,8 @@ use nanoid::nanoid;
 use tracing::{debug, info, instrument, trace};
 
 use decoding::ConsumerInfo;
+
+use crate::{env::ENV_CONFIG, BlockSubmission, STREAM_NAME};
 
 // Consumers claim messages from other consumers which have failed to acknowledge their messages
 // for longer than this limit.

@@ -1,10 +1,11 @@
 //! Decodes Redis bytes into Rust types.
-use block_submission_archiver::{BlockSubmission, STREAM_NAME};
 use fred::{
     prelude::{RedisError, RedisErrorKind, RedisResult},
     types::{FromRedis, RedisKey, RedisValue},
 };
 use tracing::{debug, trace};
+
+use crate::{BlockSubmission, STREAM_NAME};
 
 fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
     RedisError::new(RedisErrorKind::Parse, err.to_string())

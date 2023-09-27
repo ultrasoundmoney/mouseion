@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use block_submission_archiver::STREAM_NAME;
 use fred::{pool::RedisPool, prelude::StreamsInterface};
 use futures::{channel::mpsc::Sender, select, FutureExt, SinkExt};
 use tokio::{sync::Notify, task::JoinHandle, time::sleep};
 use tracing::{debug, error, info, trace};
+
+use crate::STREAM_NAME;
 
 use super::{
     decoding::XAutoClaimResponse, IdBlockSubmission, CONSUMER_ID, GROUP_NAME,
@@ -68,8 +69,9 @@ impl PendingSubmissionRedisConsumer {
                     "claimed pending messages"
                 );
                 for id_block_submission in id_block_submissions {
-                    submissions_tx.send(id_block_submission).await?;
+                    submissions_tx.feed(id_block_submission).await?;
                 }
+                submissions_tx.flush().await?;
             }
         }
     }

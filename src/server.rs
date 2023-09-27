@@ -1,17 +1,30 @@
 use anyhow::Context;
 use axum::{routing::get, Router, Server};
-use block_submission_archiver::env::{Env, ENV_CONFIG};
 use tokio::sync::Notify;
 use tracing::{error, info};
 
 use crate::{
-    env,
-    health::{self},
-    AppState,
+    env::{self, Env, ENV_CONFIG},
+    health::{self, RedisConsumerHealth, RedisHealth},
 };
 
-pub async fn serve(state: AppState, shutdown_notify: &Notify) {
+#[derive(Clone)]
+pub struct AppState {
+    pub redis_consumer_health: RedisConsumerHealth,
+    pub redis_health: RedisHealth,
+}
+
+pub async fn serve(
+    redis_consumer_health: RedisConsumerHealth,
+    redis_health: RedisHealth,
+    shutdown_notify: &Notify,
+) {
     let result = {
+        let state = AppState {
+            redis_consumer_health,
+            redis_health,
+        };
+
         let app = Router::new()
             .route("/livez", get(health::get_livez))
             .with_state(state);

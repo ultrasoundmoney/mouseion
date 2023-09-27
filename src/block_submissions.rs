@@ -377,19 +377,13 @@ mod tests {
 
     #[test]
     fn create_block_submission() {
+        let mut submission = BlockSubmission::default();
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(
-            Some(100),
-            true,
-            payload.clone(),
-            200,
-            true,
-            Some("sim_request_error".into()),
-            Some("sim_validation_error".into()),
-            true,
-            400,
-        );
+        submission.eligible_at = Some(100);
+        submission.payload = payload.clone();
+        submission.received_at = 200;
+        submission.status_code = Some(400);
 
         assert_eq!(submission.eligible_at, Some(100));
         assert_eq!(submission.payload, payload);

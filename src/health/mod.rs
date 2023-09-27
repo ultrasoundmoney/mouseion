@@ -1,7 +1,6 @@
 mod redis;
 mod redis_consumer;
 
-use block_submission_archiver::env::{Env, ENV_CONFIG};
 pub use redis::RedisHealth;
 pub use redis_consumer::RedisConsumerHealth;
 
@@ -9,7 +8,10 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;
 use tracing::{debug, warn};
 
-use crate::AppState;
+use crate::{
+    env::{Env, ENV_CONFIG},
+    server::AppState,
+};
 
 trait HealthCheck {
     fn health_status(&self) -> (bool, String);

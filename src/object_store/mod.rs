@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use block_submission_archiver::{env::ENV_CONFIG, BlockSubmission};
 use bytes::Bytes;
 use futures::{
     channel::mpsc::{Receiver, Sender},
@@ -16,7 +15,10 @@ use object_store_lib::{
 use tokio::{sync::Notify, task::JoinHandle};
 use tracing::{debug, error, info, instrument};
 
-use crate::{compression::IdBlockSubmissionCompressed, performance::BlockCounter};
+use crate::{
+    compression::IdBlockSubmissionCompressed, env::ENV_CONFIG, performance::BlockCounter,
+    BlockSubmission,
+};
 
 const MAX_CONCURRENCY: usize = 8;
 

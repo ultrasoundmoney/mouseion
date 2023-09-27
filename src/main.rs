@@ -9,34 +9,22 @@
 //! - A component which takes parsed block submissions and compresses them.
 //! - A component which takes stores the compressed block submissions in object storage.
 //! - A component which acknowledges messages which have been successfully stored.
-mod compression;
-mod health;
-mod object_store;
-mod performance;
-mod redis_consumer;
-mod server;
-
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use block_submission_archiver::{
-    env::{self, ENV_CONFIG},
-    log, BlockSubmission,
+    compression,
+    env::ENV_CONFIG,
+    health::{RedisConsumerHealth, RedisHealth},
+    log, object_store, performance, redis_consumer, server,
 };
 use fred::{pool::RedisPool, types::RedisConfig};
 use futures::channel::mpsc::{self};
-use health::{RedisConsumerHealth, RedisHealth};
 use redis_consumer::IdBlockSubmission;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, trace};
 
 use crate::{compression::IdBlockSubmissionCompressed, performance::BlockCounter};
-
-#[derive(Clone)]
-pub struct AppState {
-    redis_consumer_health: RedisConsumerHealth,
-    redis_health: RedisHealth,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -137,15 +125,10 @@ async fn main() -> Result<()> {
         stored_submissions_rx,
     );
 
-    let app_state = AppState {
-        redis_health,
-        redis_consumer_health,
-    };
-
     let server_thread = tokio::spawn({
         let shutdown_notify = shutdown_notify.clone();
         async move {
-            server::serve(app_state, &shutdown_notify).await;
+            server::serve(redis_consumer_health, redis_health, &shutdown_notify).await;
         }
     });
 

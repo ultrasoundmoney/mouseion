@@ -13,6 +13,12 @@ pub struct RedisConsumerHealth {
     started_on: Instant,
 }
 
+impl Default for RedisConsumerHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RedisConsumerHealth {
     pub fn new() -> Self {
         Self {

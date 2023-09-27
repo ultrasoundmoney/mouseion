@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use block_submission_archiver::STREAM_NAME;
 use fred::{
     pool::RedisPool,
     prelude::{RedisResult, StreamsInterface},
@@ -9,7 +8,10 @@ use futures::channel::mpsc::Receiver;
 use tokio::{sync::Notify, task::JoinHandle, time::sleep};
 use tracing::{debug, error, info, trace};
 
-use crate::redis_consumer::{ACK_SUBMISSIONS_DURATION_MS, GROUP_NAME};
+use crate::{
+    redis_consumer::{ACK_SUBMISSIONS_DURATION_MS, GROUP_NAME},
+    STREAM_NAME,
+};
 
 pub fn run_ack_submissions_thread(
     client: RedisPool,

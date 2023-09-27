@@ -10,6 +10,12 @@ pub struct BlockCounter {
     started_on: Instant,
 }
 
+impl Default for BlockCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockCounter {
     pub fn new() -> Self {
         Self {
