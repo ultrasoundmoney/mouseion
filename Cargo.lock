@@ -172,6 +172,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
+ "bytes-utils",
  "chrono",
  "flate2",
  "fred",

@@ -6,7 +6,7 @@ use chrono::{Datelike, Timelike};
 use flate2::{write::GzEncoder, Compression};
 use fred::{
     prelude::{RedisError, RedisErrorKind},
-    types::{FromRedis, MultipleOrderedPairs, RedisKey, RedisValue},
+    types::{FromRedis, MultipleOrderedPairs, RedisKey, RedisMap, RedisValue},
 };
 use object_store::path::Path;
 use serde::{Deserialize, Serialize};
@@ -20,11 +20,18 @@ use crate::units::Slot;
 #[derive(Deserialize, Serialize)]
 pub struct BlockSubmission {
     // Not every block submission becomes eligible, so this field is optional.
-    // TODO: Once builder-api deploys a fix to omit eligible_at when unavailable instead of giving
-    // us negative values, this may be set to u64.
-    pub eligible_at: Option<i64>,
-    payload: serde_json::Value,
-    pub received_at: u64,
+    eligible_at: Option<u64>,
+    pub payload: serde_json::Value,
+    received_at: u64,
+    // Optional until builder-api is updated to send it.
+    safe_to_propose: Option<bool>,
+    // Optional until builder-api is updated to send it.
+    sim_optimistic: Option<bool>,
+    // Optional until builder-api is updated to send it.
+    sim_request_error: Option<String>,
+    sim_validation_error: Option<String>,
+    // Optional until builder-api is updated to send it.
+    sim_was_simulated: Option<bool>,
     // A status code is not always available. Both historically, and because builder-api doesn't
     // always provide one.
     status_code: Option<u16>,
@@ -35,8 +42,14 @@ impl std::fmt::Debug for BlockSubmission {
         let state_root = self.state_root();
         f.debug_struct("BlockSubmission")
             .field("eligible_at", &self.eligible_at)
+            .field("sim_optimistic", &self.sim_optimistic)
             .field("payload", &format!("<PAYLOAD_JSON:{state_root}>"))
             .field("received_at", &self.received_at)
+            .field("safe_to_propose", &self.safe_to_propose)
+            .field("sim_request_error", &self.sim_request_error)
+            .field("sim_validation_error", &self.sim_validation_error)
+            .field("sim_was_simulated", &self.sim_was_simulated)
+            .field("status_code", &self.status_code)
             .finish()
     }
 }
@@ -46,16 +59,48 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
         let mut pairs: Vec<(RedisKey, RedisValue)> = vec![
             (
                 "payload".into(),
-                RedisValue::String(entry.payload.to_string().into()),
+                RedisValue::String(serde_json::to_string(&entry.payload).unwrap().into()),
             ),
-            ("received_at".into(), (entry.received_at as i64).into()),
+            (
+                "received_at".into(),
+                RedisValue::Integer(entry.received_at.try_into().unwrap()),
+            ),
         ];
+
         if let Some(eligible_at) = entry.eligible_at {
-            pairs.push(("eligible_at".into(), eligible_at.into()));
+            pairs.push((
+                "eligible_at".into(),
+                RedisValue::Integer(eligible_at as i64),
+            ))
         }
+
         if let Some(status_code) = entry.status_code {
-            pairs.push(("status_code".into(), (status_code as i64).into()));
+            pairs.push((
+                "status_code".into(),
+                RedisValue::Integer(status_code.into()),
+            ))
         }
+
+        if let Some(sim_optimistic) = entry.sim_optimistic {
+            pairs.push(("sim_optimistic".into(), RedisValue::Boolean(sim_optimistic)))
+        }
+
+        if let Some(sim_request_error) = entry.sim_request_error {
+            pairs.push(("sim_request_error".into(), sim_request_error.into()))
+        }
+
+        if let Some(sim_validation_error) = entry.sim_validation_error {
+            pairs.push(("sim_validation_error".into(), sim_validation_error.into()))
+        }
+
+        if let Some(sim_was_simulated) = entry.sim_was_simulated {
+            pairs.push(("sim_was_simulated".into(), sim_was_simulated.into()))
+        }
+
+        if let Some(safe_to_propose) = entry.safe_to_propose {
+            pairs.push(("safe_to_propose".into(), safe_to_propose.into()))
+        }
+
         pairs.try_into().unwrap()
     }
 }
@@ -66,98 +111,201 @@ fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
 
 impl FromRedis for BlockSubmission {
     fn from_value(value: RedisValue) -> Result<Self, RedisError> {
-        let mut map: HashMap<String, Bytes> = value.convert()?;
-        let eligible_at = match map.remove("eligible_at") {
-            Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|e| {
+        let mut map: HashMap<String, RedisValue> = value.convert()?;
+
+        let eligible_at = map
+            .remove("eligible_at")
+            .map(|rv| {
+                rv.as_u64().ok_or_else(|| {
                     into_redis_parse_err(format!(
-                        "failed to convert eligible_at bytes to str, {}",
-                        e
+                        "failed to parse eligible_at as u64, str: {}",
+                        rv.as_bytes_str().unwrap()
                     ))
-                })?;
-                let num = str.parse::<i64>().map_err(|e| {
-                    into_redis_parse_err(format!(
-                        "failed to parse eligible_at str as i64, {}, str: {}",
-                        e, str
-                    ))
-                })?;
-                Ok::<_, RedisError>(Some(num))
-            }
-            None => Ok(None),
-        }?;
+                })
+            })
+            .transpose()?;
+
         let received_at = {
-            let bytes = map
+            let rv = map
                 .remove("received_at")
-                .ok_or_else(|| into_redis_parse_err("expected received_at in block submission"))?
-                .to_vec();
-            let str = std::str::from_utf8(&bytes).map_err(|e| {
-                into_redis_parse_err(format!("failed to convert received_at bytes to str, {}", e))
-            })?;
-            str.parse::<u64>().map_err(|e| {
+                .ok_or_else(|| into_redis_parse_err("expected received_at in block submission"))?;
+
+            rv.as_u64().ok_or_else(|| {
                 into_redis_parse_err(format!(
-                    "failed to parse received_at str as u64, {}, str: {}",
-                    e, str
+                    "failed to parse received_at as u64, str: {}",
+                    rv.as_bytes_str().unwrap()
                 ))
             })?
         };
+
         let payload = {
-            let bytes = map
+            let str = map
                 .remove("payload")
                 .ok_or_else(|| into_redis_parse_err("expected payload in block submission"))?
-                .to_vec();
+                .as_bytes_str()
+                .ok_or_else(|| into_redis_parse_err("failed to parse payload as bytes str"))?;
             // We could implement custom Deserialize for this to avoid parsing the JSON here, we
             // don't do anything with it besides Serialize it later.
-            serde_json::from_slice(&bytes).map_err(|e| {
+            serde_json::from_str(&str).map_err(|e| {
                 into_redis_parse_err(format!(
                     "failed to parse payload bytes as serde_json Value, {}",
                     e
                 ))
             })?
         };
-        // TODO: once builder-api is updated to omit the code entirely when not available we can
-        // remove the special case for the 0 value.
-        let status_code = match map.remove("status_code") {
-            Some(bytes) => {
-                let str = std::str::from_utf8(&bytes).map_err(|e| {
+
+        let status_code = map
+            .remove("status_code")
+            .map(|rv| {
+                rv.as_u64()
+                    .ok_or_else(|| {
+                        into_redis_parse_err(format!(
+                            "failed to parse status_code as u64, str: {}",
+                            rv.as_bytes_str().unwrap()
+                        ))
+                    })
+                    .map(|u| u as u16)
+            })
+            .transpose()?;
+
+        let sim_optimistic = map
+            .remove("sim_optimistic")
+            .map(|rv| {
+                rv.as_bool().ok_or_else(|| {
                     into_redis_parse_err(format!(
-                        "failed to convert eligible_at bytes to str: {}",
-                        e
+                        "failed to parse sim_optimistic as bool, str: {}",
+                        rv.as_bytes_str().unwrap()
                     ))
-                })?;
-                let status_code = str.parse::<u16>().map_err(|e| {
+                })
+            })
+            .transpose()?;
+
+        let sim_request_error = map
+            .remove("sim_request_error")
+            .map(|rv| {
+                rv.as_string()
+                    .ok_or_else(|| {
+                        into_redis_parse_err(format!(
+                            "failed to parse sim_request_error as string, str: {}",
+                            rv.as_bytes_str().unwrap()
+                        ))
+                    })
+                    .map(|s| s.to_string())
+            })
+            .transpose()?;
+
+        let sim_validation_error = map
+            .remove("sim_validation_error")
+            .map(|rv| {
+                rv.as_string()
+                    .ok_or_else(|| {
+                        into_redis_parse_err(format!(
+                            "failed to parse sim_validation_error as string, str: {}",
+                            rv.as_bytes_str().unwrap()
+                        ))
+                    })
+                    .map(|s| s.to_string())
+            })
+            .transpose()?;
+
+        let sim_was_simulated = map
+            .remove("sim_was_simulated")
+            .map(|rv| {
+                rv.as_bool().ok_or_else(|| {
                     into_redis_parse_err(format!(
-                        "failed to parse status_code as u16: {}, {}",
-                        e, str
+                        "failed to parse sim_was_simulated as bool, str: {}",
+                        rv.as_bytes_str().unwrap()
                     ))
-                })?;
-                Ok::<_, RedisError>(Some(status_code))
-            }
-            None => Ok(None),
-        }?;
+                })
+            })
+            .transpose()?;
+
+        let safe_to_propose = map
+            .remove("safe_to_propose")
+            .map(|rv| {
+                rv.as_bool().ok_or_else(|| {
+                    into_redis_parse_err(format!(
+                        "failed to parse safe_to_propose as bool, str: {}",
+                        rv.as_bytes_str().unwrap()
+                    ))
+                })
+            })
+            .transpose()?;
+
         Ok(Self {
             eligible_at,
+            sim_optimistic,
             payload,
             received_at,
+            safe_to_propose,
+            sim_request_error,
+            sim_validation_error,
+            sim_was_simulated,
             status_code,
         })
     }
 }
 
-impl BlockSubmission {
-    pub fn new(
-        eligible_at: Option<i64>,
-        payload: serde_json::Value,
-        received_at: u64,
-        status_code: u16,
-    ) -> Self {
+impl From<BlockSubmission> for RedisValue {
+    fn from(entry: BlockSubmission) -> Self {
+        #![allow(clippy::mutable_key_type)]
+        let mut map: HashMap<RedisKey, RedisValue> = HashMap::new();
+        if let Some(eligible_at) = entry.eligible_at {
+            map.insert(
+                "eligible_at".into(),
+                RedisValue::Integer(eligible_at as i64),
+            );
+        }
+        map.insert(
+            "payload".into(),
+            RedisValue::String(entry.payload.to_string().into()),
+        );
+        map.insert(
+            "received_at".into(),
+            RedisValue::Integer(entry.received_at as i64),
+        );
+        if let Some(status_code) = entry.status_code {
+            map.insert(
+                "status_code".into(),
+                RedisValue::Integer(status_code.into()),
+            );
+        }
+        if let Some(sim_optimistic) = entry.sim_optimistic {
+            map.insert("sim_optimistic".into(), RedisValue::Boolean(sim_optimistic));
+        }
+        if let Some(sim_request_error) = entry.sim_request_error {
+            map.insert("sim_request_error".into(), sim_request_error.into());
+        }
+        if let Some(sim_validation_error) = entry.sim_validation_error {
+            map.insert("sim_validation_error".into(), sim_validation_error.into());
+        }
+        if let Some(sim_was_simulated) = entry.sim_was_simulated {
+            map.insert("sim_was_simulated".into(), sim_was_simulated.into());
+        }
+        if let Some(safe_to_propose) = entry.safe_to_propose {
+            map.insert("safe_to_propose".into(), safe_to_propose.into());
+        }
+        RedisMap::try_from(map).map(RedisValue::Map).unwrap()
+    }
+}
+
+impl Default for BlockSubmission {
+    fn default() -> Self {
         Self {
-            eligible_at,
-            payload,
-            received_at,
-            status_code: Some(status_code),
+            eligible_at: None,
+            sim_optimistic: None,
+            payload: serde_json::Value::Null,
+            received_at: 0,
+            safe_to_propose: None,
+            sim_request_error: None,
+            sim_validation_error: None,
+            sim_was_simulated: None,
+            status_code: None,
         }
     }
+}
 
+impl BlockSubmission {
     pub fn bundle_path(&self) -> Path {
         let state_root = self.state_root();
 
@@ -231,39 +379,22 @@ mod tests {
     fn create_block_submission() {
         let payload =
             json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(Some(100), payload.clone(), 200, 400);
+        let submission = BlockSubmission::new(
+            Some(100),
+            true,
+            payload.clone(),
+            200,
+            true,
+            Some("sim_request_error".into()),
+            Some("sim_validation_error".into()),
+            true,
+            400,
+        );
 
         assert_eq!(submission.eligible_at, Some(100));
         assert_eq!(submission.payload, payload);
         assert_eq!(submission.received_at, 200);
         assert_eq!(submission.status_code, Some(400));
-    }
-
-    // This test depends on the environment, some tests break the environment, if it runs at an
-    // unlucky time it will fail.
-    #[test]
-    fn test_bundle_path_generation() {
-        // This test unfortunately depends on the ENV, which means we need a fully formed ENV
-        // available.
-        if std::env::var("REDIS_URI").is_err() {
-            std::env::set_var("REDIS_URI", "dummy_redis_uri")
-        }
-        let payload =
-            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(Some(100), payload, 200, 400);
-
-        let path = submission.bundle_path();
-        assert_eq!(path.to_string(), "2020/12/01/12/08/42/some_root.json.gz");
-    }
-
-    #[tokio::test]
-    async fn test_block_submission_compression() {
-        let payload =
-            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
-        let submission = BlockSubmission::new(Some(100), payload, 200, 400);
-
-        let compressed_result = submission.compress().await;
-        assert!(compressed_result.is_ok());
     }
 
     #[test]

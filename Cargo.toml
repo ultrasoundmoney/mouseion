@@ -13,6 +13,7 @@ anyhow = { version = "1.0.75", features = ["backtrace"] }
 async-trait = "0.1.73"
 axum = "0.6.20"
 bytes = "1.4.0"
+bytes-utils = "0.1.3"
 chrono = { version = "0.4.26", default-features = false }
 flate2 = "1.0.27"
 fred = { version = "6.3.0" }
