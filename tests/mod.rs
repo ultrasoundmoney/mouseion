@@ -1,25 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use anyhow::{Context, Result};
-use block_submission_archiver::{
-    compression::IdBlockSubmissionCompressed,
-    env::ENV_CONFIG,
-    health, log, object_store,
-    redis_consumer::{self, IdBlockSubmission},
-    run::run_all,
-    BlockSubmission, STREAM_NAME,
-};
+use anyhow::Result;
+use block_submission_archiver::{env::ENV_CONFIG, run::run_all, BlockSubmission, STREAM_NAME};
 use fred::{
-    pool::RedisPool,
-    prelude::{ClientLike, KeysInterface, RedisClient, StreamsInterface},
-    types::{MultipleOrderedPairs, RedisConfig, RedisValue},
+    prelude::{ClientLike, RedisClient, StreamsInterface},
+    types::{MultipleOrderedPairs, RedisConfig},
 };
-use futures::channel::mpsc::{self, channel};
-use tokio::{sync::Notify, time::sleep};
+use tokio::time::sleep;
 
 #[tokio::test]
 async fn archive_block_submission() -> Result<()> {
-    log::init();
     run_all().await?;
 
     let block_submission = {
