@@ -69,6 +69,7 @@ impl PendingSubmissionRedisConsumer {
                     "claimed pending messages"
                 );
                 for id_block_submission in id_block_submissions {
+                    trace!(id = %id_block_submission.0, block_submission = ?id_block_submission.1, "consumed pending block submission");
                     submissions_tx.feed(id_block_submission).await?;
                 }
                 submissions_tx.flush().await?;

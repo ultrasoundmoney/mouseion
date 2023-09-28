@@ -4,7 +4,7 @@ use anyhow::Result;
 use fred::{pool::RedisPool, prelude::StreamsInterface};
 use futures::{channel::mpsc::Sender, select, FutureExt, SinkExt};
 use tokio::{sync::Notify, task::JoinHandle};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use crate::{health::RedisConsumerHealth, BlockSubmission, STREAM_NAME};
 
@@ -61,6 +61,7 @@ impl NewSubmissionRedisConsumer {
                     self.message_health.set_last_message_received_now();
 
                     for id_block_submission in id_block_submissions {
+                        trace!(id = %id_block_submission.0, block_submission = ?id_block_submission.1, "consumed new block submission");
                         submissions_tx.feed(id_block_submission).await?;
                     }
                     submissions_tx.flush().await?;
