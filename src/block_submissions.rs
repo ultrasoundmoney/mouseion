@@ -15,11 +15,31 @@ use tracing::{debug, instrument};
 
 use crate::units::Slot;
 
+fn deserialize_eligible_at<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let eligible_at: Option<i64> = Option::deserialize(deserializer)?;
+
+    // eligible_at used to be sent as a negative number instead of nil when not available.
+    // Until we update our example submissions we handle this special bug case.
+    let eligible_at = eligible_at.and_then(|eligible_at| {
+        if eligible_at < 0 {
+            None
+        } else {
+            Some(eligible_at as u64)
+        }
+    });
+
+    Ok(eligible_at)
+}
+
 /// Block submission archive entries.
 /// These are block submissions as they came in on the relay, plus some metadata.
 #[derive(Deserialize, Serialize)]
 pub struct BlockSubmission {
     // Not every block submission becomes eligible, so this field is optional.
+    #[serde(deserialize_with = "deserialize_eligible_at")]
     eligible_at: Option<u64>,
     pub payload: serde_json::Value,
     received_at: u64,
