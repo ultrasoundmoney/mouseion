@@ -43,7 +43,7 @@ pub struct BlockSubmission {
     #[serde(deserialize_with = "deserialize_eligible_at")]
     eligible_at: Option<u64>,
     execution_payload_size: Option<u64>,
-    http_encoding: String,
+    http_encoding: Option<String>,
     pub payload: serde_json::Value,
     payload_encoding: String,
     received_at: u64,
@@ -100,10 +100,6 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
                 RedisValue::Boolean(entry.sim_was_simulated),
             ),
             (
-                "http_encoding".into(),
-                RedisValue::String(entry.http_encoding.into()),
-            ),
-            (
                 "payload_encoding".into(),
                 RedisValue::String(entry.payload_encoding.into()),
             ),
@@ -148,6 +144,10 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
                 "execution_payload_size".into(),
                 RedisValue::Integer(execution_payload_size as i64),
             ))
+        }
+
+        if let Some(http_encoding) = entry.http_encoding {
+            pairs.push(("http_encoding".into(), http_encoding.into()))
         }
 
         pairs.try_into().unwrap()
@@ -268,7 +268,7 @@ impl FromRedis for BlockSubmission {
         let builder_ip = parse_string_optional(&mut map, "builder_ip")?;
         let eligible_at = parse_u64_optional(&mut map, "eligible_at")?;
         let execution_payload_size = parse_u64_optional(&mut map, "execution_payload_size")?;
-        let http_encoding = parse_string_required(&mut map, "http_encoding")?;
+        let http_encoding = parse_string_optional(&mut map, "http_encoding")?;
         let payload_encoding = parse_string_required(&mut map, "payload_encoding")?;
         let received_at = parse_u64_required(&mut map, "received_at")?;
         let safe_to_propose = parse_bool_required(&mut map, "safe_to_propose")?;
@@ -361,7 +361,7 @@ impl Default for BlockSubmission {
             builder_ip: None,
             eligible_at: None,
             execution_payload_size: None,
-            http_encoding: "gzip".to_string(),
+            http_encoding: None,
             payload: serde_json::Value::Null,
             payload_encoding: "json".to_string(),
             received_at: 0,
@@ -477,7 +477,6 @@ mod tests {
             "sim_was_simulated".into(),
             RedisValue::String("true".into()),
         );
-        redis_map.insert("http_encoding".into(), RedisValue::String("gzip".into()));
         redis_map.insert("payload_encoding".into(), RedisValue::String("json".into()));
         redis_map.insert("safe_to_propose".into(), RedisValue::String("true".into()));
         let value: RedisValue = RedisValue::Map(redis_map);
