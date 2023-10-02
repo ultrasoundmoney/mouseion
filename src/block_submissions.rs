@@ -441,10 +441,8 @@ impl BlockSubmission {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use fred::types::{RedisMap, RedisValue};
     use serde_json::json;
-    use std::collections::HashMap;
 
     #[test]
     fn create_block_submission() {
