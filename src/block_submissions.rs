@@ -158,8 +158,8 @@ fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
     RedisError::new(RedisErrorKind::Parse, err.to_string())
 }
 
-fn parse_string_optional<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_string_optional(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<Option<String>, RedisError> {
     map.remove(key)
@@ -170,8 +170,8 @@ fn parse_string_optional<'a>(
         .transpose()
 }
 
-fn parse_string_required<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_string_required(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<String, RedisError> {
     let v = map
@@ -189,8 +189,8 @@ fn parse_string_required<'a>(
     Ok(v)
 }
 
-fn parse_u64_optional<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_u64_optional(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<Option<u64>, RedisError> {
     map.remove(key)
@@ -206,8 +206,8 @@ fn parse_u64_optional<'a>(
         .transpose()
 }
 
-fn parse_u64_required<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_u64_required(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<u64, RedisError> {
     let v = map
@@ -225,8 +225,8 @@ fn parse_u64_required<'a>(
     Ok(v)
 }
 
-fn parse_bool_optional<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_bool_optional(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<Option<bool>, RedisError> {
     map.remove(key)
@@ -242,8 +242,8 @@ fn parse_bool_optional<'a>(
         .transpose()
 }
 
-fn parse_bool_required<'a>(
-    map: &'a mut HashMap<String, RedisValue>,
+fn parse_bool_required(
+    map: &'_ mut HashMap<String, RedisValue>,
     key: &str,
 ) -> Result<bool, RedisError> {
     let v = map
