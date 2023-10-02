@@ -39,6 +39,7 @@ where
 #[derive(Deserialize, Serialize)]
 pub struct BlockSubmission {
     builder_ip: Option<String>,
+    download_duration: Option<u64>,
     // Not every block submission becomes eligible, so this field is optional.
     #[serde(deserialize_with = "deserialize_eligible_at")]
     eligible_at: Option<u64>,
@@ -148,6 +149,13 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
 
         if let Some(http_encoding) = entry.http_encoding {
             pairs.push(("http_encoding".into(), http_encoding.into()))
+        }
+
+        if let Some(download_duration) = entry.download_duration {
+            pairs.push((
+                "download_duration".into(),
+                RedisValue::Integer(download_duration as i64),
+            ))
         }
 
         pairs.try_into().unwrap()
@@ -266,6 +274,7 @@ impl FromRedis for BlockSubmission {
         let mut map: HashMap<String, RedisValue> = value.convert()?;
 
         let builder_ip = parse_string_optional(&mut map, "builder_ip")?;
+        let download_duration = parse_u64_optional(&mut map, "download_duration")?;
         let eligible_at = parse_u64_optional(&mut map, "eligible_at")?;
         let execution_payload_size = parse_u64_optional(&mut map, "execution_payload_size")?;
         let http_encoding = parse_string_optional(&mut map, "http_encoding")?;
@@ -297,6 +306,7 @@ impl FromRedis for BlockSubmission {
 
         Ok(Self {
             builder_ip,
+            download_duration,
             eligible_at,
             execution_payload_size,
             http_encoding,
@@ -359,6 +369,7 @@ impl Default for BlockSubmission {
     fn default() -> Self {
         Self {
             builder_ip: None,
+            download_duration: None,
             eligible_at: None,
             execution_payload_size: None,
             http_encoding: None,
