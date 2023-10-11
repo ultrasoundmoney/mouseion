@@ -27,8 +27,12 @@ pub async fn get_livez(State(state): State<AppState>) -> impl IntoResponse {
     // on staging. Although we'd still like to report the archiver is in an unhealthy state, we
     // don't want k8s to consider us unhealthy and restart. Therefore we ignore message health.
     let is_messages_healthy = {
-        debug!("env is staging, ignoring message health in health status");
-        ENV_CONFIG.env == Env::Stag || is_messages_healthy
+        if ENV_CONFIG.env == Env::Stag {
+            debug!("env is staging, ignoring message health in health status");
+            true
+        } else {
+            is_messages_healthy
+        }
     };
 
     if is_redis_healthy && is_messages_healthy {
