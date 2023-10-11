@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 
         let raw_block_submission = read_file(decompressed_path)?;
         let block_submission: BlockSubmission = serde_json::from_str(&raw_block_submission)?;
-        let id = path.split("/").last().unwrap().replace(".json.gz", "");
+        let id = path.split('/').last().unwrap().replace(".json.gz", "");
 
         client
             .xadd(STREAM_NAME, false, None, "*", block_submission)
