@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
 
         if !decompressed_path.exists() {
             debug!("decompressing {}", path);
-            decompress_gz_to_file(&path, decompressed_path)?;
+            decompress_gz_to_file(path, decompressed_path)?;
         }
 
         let raw_block_submission = read_file(decompressed_path)?;
