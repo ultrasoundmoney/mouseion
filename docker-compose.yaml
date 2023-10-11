@@ -5,7 +5,7 @@ services:
     ports:
       - 6379:6379
 
-  archiver:
+  mouseion:
     build:
       context: .
       dockerfile: Dockerfile
@@ -17,21 +17,20 @@ services:
       - ENV=dev
       - NETWORK=mainnet
       - REDIS_URI=redis://redis:6379
-      - RUST_LOG=block_submission_archiver=debug
+      - RUST_LOG=mouseion=debug
       - S3_BUCKET=block-submission-archive-dev
       - USE_LOCAL_STORE=false
     depends_on:
       - redis
 
-  simulator:
+  sim-submissions:
     build:
       context: .
       dockerfile: Dockerfile.sim
-    command: ["/app/sim-messages"]
     environment:
       - ENV=dev
       - REDIS_URI=redis://redis:6379
-      - RUST_LOG=block_submission_simulator=debug
+      - RUST_LOG=sim_submissions=debug
     depends_on:
       - redis
     volumes:

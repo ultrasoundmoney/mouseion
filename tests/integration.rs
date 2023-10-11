@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use block_submission_archiver::{env::ENV_CONFIG, run::run_all, BlockSubmission, STREAM_NAME};
 use fred::{
     prelude::{ClientLike, RedisClient, StreamsInterface},
     types::{MultipleOrderedPairs, RedisConfig},
 };
+use mouseion::{env::ENV_CONFIG, run::run_all, BlockSubmission, STREAM_NAME};
 use tokio::time::sleep;
 
 #[tokio::test]

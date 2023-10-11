@@ -1,11 +1,11 @@
 [package]
-name = "block-submission-archiver"
 version = "3.3.0"
+name = "mouseion"
 edition = "2021"
-default-run = "block-submission-archiver"
+default-run = "mouseion"
 
 [[bin]]
-name = "block-submission-archiver"
+name = "mouseion"
 path = "src/main.rs"
 
 [dependencies]

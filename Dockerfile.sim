@@ -8,14 +8,14 @@ COPY Cargo.toml Cargo.lock ./
 RUN mkdir src/
 RUN echo "fn main() {}" > dummy.rs
 RUN sed -i 's#src/main.rs#dummy.rs#' Cargo.toml
-RUN cargo build --release --bin block-submission-archiver
+RUN cargo build --release --bin mouseion
 
 # Build executable.
 COPY src ./src
-RUN cargo build --release --bin block-submission-simulator
+RUN cargo build --release --bin sim-submissions
 
 # Build runtime image.
 FROM gcr.io/distroless/cc-debian12 AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/block-submission-simulator /app/block-submission-simulator
-ENTRYPOINT ["/app/block-submission-simulator"]
+COPY --from=builder /app/target/release/sim-submissions /app/sim-submissions
+ENTRYPOINT ["/app/sim-submissions"]

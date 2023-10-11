@@ -1,4 +1,4 @@
-//! # Block Submission Archiver
+//! # Mouseion
 //! Takes the many block submissions that the relay receives, over a message queue, bundles them
 //! by slot, and stores them in cheap Object Storage.
 //!
@@ -144,3 +144,4 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
