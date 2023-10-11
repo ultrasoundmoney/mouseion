@@ -14,7 +14,7 @@ use mouseion::{env::ENV_CONFIG, log, BlockSubmission, STREAM_NAME};
 use tracing::{debug, info};
 
 const EXAMPLE_PATHS: [&str; 1] = [
-    "example_block_submissions/1697056058008140-0xf519ffef650b5fc9f000e7864439dacf99a2f34df78e1479dced6e882549c68d.json.gz",
+    "example_block_submissions/1697056058008140-0x8b6b5967a9651ead03112cf89826655e837f4b2dbf50c8a418e1ca7923248097.json.gz",
 ];
 
 fn decompress_gz_to_file(input_path: &str, output_path: &Path) -> Result<(), std::io::Error> {

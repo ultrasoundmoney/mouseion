@@ -1,4 +1,8 @@
-use std::{collections::HashMap, io::Write};
+use std::{
+    collections::HashMap,
+    io::Write,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -67,13 +71,13 @@ pub struct BlockSubmission {
 
 impl std::fmt::Debug for BlockSubmission {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state_root = self.state_root();
+        let block_hash = self.block_hash();
         f.debug_struct("BlockSubmission")
             .field("builder_ip", &self.builder_ip)
             .field("eligible_at", &self.eligible_at)
             .field("execution_payload_size", &self.execution_payload_size)
             .field("http_encoding", &self.http_encoding)
-            .field("payload", &format!("<PAYLOAD_JSON:{state_root}>"))
+            .field("payload", &format!("<PAYLOAD_JSON:{block_hash}>"))
             .field("payload_encoding", &self.payload_encoding)
             .field("received_at", &self.received_at)
             .field("safe_to_propose", &self.safe_to_propose)
@@ -292,7 +296,12 @@ impl Default for BlockSubmission {
 
 impl BlockSubmission {
     pub fn bundle_path(&self) -> Path {
-        let state_root = self.state_root();
+        let timestamp_micros = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("expect duration since UNIX_EPOCH to be positive regardless of clock shift")
+            .as_micros();
+
+        let block_hash = self.block_hash();
 
         let slot = self.slot();
         let slot_date_time = slot.date_time();
@@ -303,14 +312,14 @@ impl BlockSubmission {
         let minute = slot_date_time.minute();
 
         let path_string =
-            format!("{year}/{month:02}/{day:02}/{hour:02}/{minute:02}/{slot}/{state_root}.json.gz");
+            format!("{year}/{month:02}/{day:02}/{hour:02}/{minute:02}/{slot}/{timestamp_micros}-{block_hash}.json.gz");
         Path::from(path_string)
     }
 
-    #[instrument(skip(self), fields(slot = %self.slot(), state_root = %self.state_root()))]
+    #[instrument(skip(self), fields(slot = %self.slot(), block_hash = %self.block_hash()))]
     pub async fn compress(&self) -> Result<Bytes> {
         let slot = self.slot();
-        let state_root = self.state_root();
+        let block_hash = self.block_hash();
 
         let json_str = serde_json::to_string(&self)?;
         let json_size_kb = json_str.len() / 1000;
@@ -329,7 +338,7 @@ impl BlockSubmission {
 
         debug!(
             slot = slot.to_string().as_str(),
-            state_root = state_root.as_str(),
+            block_hash = block_hash.as_str(),
             uncompressed_size_kb = json_size_kb,
             compressed_size_kb = json_gz_size_kb,
             compression_ratio = compression_ratio_truncated,
@@ -344,8 +353,8 @@ impl BlockSubmission {
         slot_str.parse::<Slot>().unwrap()
     }
 
-    pub fn state_root(&self) -> String {
-        self.payload["execution_payload"]["state_root"]
+    pub fn block_hash(&self) -> String {
+        self.payload["execution_payload"]["block_hash"]
             .as_str()
             .unwrap()
             .to_string()
@@ -362,7 +371,7 @@ mod tests {
     fn create_block_submission() {
         let mut submission = BlockSubmission::default();
         let payload =
-            json!({"message": {"slot": "42"}, "execution_payload": {"state_root": "some_root"}});
+            json!({"message": {"slot": "42"}, "execution_payload": {"block_hash": "some_hash"}});
         submission.eligible_at = Some(100);
         submission.payload = payload.clone();
         submission.received_at = 200;
@@ -381,7 +390,7 @@ mod tests {
         redis_map.insert(
             "payload".into(),
             RedisValue::String(
-                "{\"message\": {\"slot\": \"42\"}, \"execution_payload\": {\"state_root\": \"some_root\"}}"
+                "{\"message\": {\"slot\": \"42\"}, \"execution_payload\": {\"block_hash\": \"some_hash\"}}"
                     .into(),
             ),
         );
@@ -396,7 +405,6 @@ mod tests {
         let value: RedisValue = RedisValue::Map(redis_map);
         let result = BlockSubmission::from_value(value);
 
-        dbg!(&result);
         assert!(result.is_ok());
         let submission = result.unwrap();
         assert_eq!(submission.eligible_at, Some(100));

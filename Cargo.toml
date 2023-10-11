@@ -1,6 +1,6 @@
 [package]
-version = "3.3.0"
 name = "mouseion"
+version = "4.3.0"
 edition = "2021"
 default-run = "mouseion"
 

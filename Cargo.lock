@@ -165,31 +165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "block-submission-archiver"
-version = "3.3.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "bytes",
- "bytes-utils",
- "chrono",
- "flate2",
- "fred",
- "futures",
- "lazy_static",
- "memory-stats",
- "nanoid",
- "object_store",
- "pin-project",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -770,6 +745,31 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "mouseion"
+version = "4.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bytes",
+ "bytes-utils",
+ "chrono",
+ "flate2",
+ "fred",
+ "futures",
+ "lazy_static",
+ "memory-stats",
+ "nanoid",
+ "object_store",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

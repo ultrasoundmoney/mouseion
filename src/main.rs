@@ -12,14 +12,14 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use block_submission_archiver::{
+use fred::{pool::RedisPool, types::RedisConfig};
+use futures::channel::mpsc::{self};
+use mouseion::{
     compression,
     env::ENV_CONFIG,
     health::{RedisConsumerHealth, RedisHealth},
     log, object_store, performance, redis_consumer, server,
 };
-use fred::{pool::RedisPool, types::RedisConfig};
-use futures::channel::mpsc::{self};
 use redis_consumer::IdBlockSubmission;
 use tokio::{sync::Notify, try_join};
 use tracing::{info, trace};
@@ -144,4 +144,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

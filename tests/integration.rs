@@ -16,7 +16,7 @@ async fn archive_block_submission() -> Result<()> {
     redis_client.wait_for_connect().await?;
 
     let block_submission = {
-        let file = std::fs::File::open("tests/fixtures/0xffe314e3f12d726cf9f4a4babfcbfc836ef53d3144469f886423a833c853e3ef.json.gz.decompressed")?;
+        let file = std::fs::File::open("tests/fixtures/1697056058008140-0x8b6b5967a9651ead03112cf89826655e837f4b2dbf50c8a418e1ca7923248097.json")?;
         let submission: BlockSubmission = serde_json::from_reader(file)?;
         submission
     };

@@ -55,7 +55,7 @@ pub fn build_env_based_store() -> Result<Box<dyn ObjectStore>> {
     }
 }
 
-#[instrument(skip_all, fields(slot = %block_submission.slot(), state_root = %block_submission.state_root()))]
+#[instrument(skip_all, fields(slot = %block_submission.slot(), block_hash = %block_submission.block_hash()))]
 async fn store_submission(
     object_store: &dyn ObjectStore,
     block_submission: &BlockSubmission,
@@ -73,7 +73,7 @@ async fn store_submission(
         Err(e) => {
             if format!("{:?}", &e).contains("OperationAborted") {
                 debug!(
-                    state_root = block_submission.state_root(),
+                    block_hash = block_submission.block_hash(),
                     "hit 409 - conflict when storing bundle, ignoring"
                 );
                 Ok(())
@@ -101,7 +101,7 @@ async fn store_submissions(
                 match result {
                     Ok(_) => {
                         debug!(
-                            state_root = block_submission.state_root(),
+                            block_hash = block_submission.block_hash(),
                             "stored block submission"
                         );
                         block_counter.increment();
