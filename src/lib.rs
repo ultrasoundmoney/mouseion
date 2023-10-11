@@ -6,6 +6,7 @@ pub mod log;
 pub mod object_store;
 pub mod performance;
 pub mod redis_consumer;
+pub mod redis_decoding;
 pub mod run;
 pub mod server;
 pub mod units;

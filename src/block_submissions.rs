@@ -13,7 +13,13 @@ use serde::{Deserialize, Serialize};
 use tokio::task::spawn_blocking;
 use tracing::{debug, instrument};
 
-use crate::units::Slot;
+use crate::{
+    redis_decoding::{
+        parse_bool_optional, parse_bool_required, parse_string_optional, parse_string_required,
+        parse_u64_optional, parse_u64_required,
+    },
+    units::Slot,
+};
 
 fn deserialize_eligible_at<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
@@ -164,109 +170,6 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
 
 fn into_redis_parse_err(err: impl std::fmt::Display) -> RedisError {
     RedisError::new(RedisErrorKind::Parse, err.to_string())
-}
-
-fn parse_string_optional(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<Option<String>, RedisError> {
-    map.remove(key)
-        .map(|rv| {
-            rv.as_string()
-                .ok_or_else(|| into_redis_parse_err(format!("failed to parse {} as string", key)))
-        })
-        .transpose()
-}
-
-fn parse_string_required(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<String, RedisError> {
-    let v = map
-        .remove(key)
-        .ok_or_else(|| into_redis_parse_err(format!("expected {} in block submission", key)))?
-        .as_string()
-        .ok_or_else(|| {
-            into_redis_parse_err(format!(
-                "failed to parse {} as string, str: {}",
-                key,
-                map.get(key).unwrap().as_str().unwrap()
-            ))
-        })?;
-
-    Ok(v)
-}
-
-fn parse_u64_optional(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<Option<u64>, RedisError> {
-    map.remove(key)
-        .map(|rv| {
-            rv.as_u64().ok_or_else(|| {
-                into_redis_parse_err(format!(
-                    "failed to parse {} as u64, str: {}",
-                    key,
-                    rv.as_str().unwrap()
-                ))
-            })
-        })
-        .transpose()
-}
-
-fn parse_u64_required(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<u64, RedisError> {
-    let v = map
-        .remove(key)
-        .ok_or_else(|| into_redis_parse_err(format!("expected {} in block submission", key)))?
-        .as_u64()
-        .ok_or_else(|| {
-            into_redis_parse_err(format!(
-                "failed to parse {} as u64, str: {}",
-                key,
-                map.get(key).unwrap().as_str().unwrap()
-            ))
-        })?;
-
-    Ok(v)
-}
-
-fn parse_bool_optional(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<Option<bool>, RedisError> {
-    map.remove(key)
-        .map(|rv| {
-            rv.as_bool().ok_or_else(|| {
-                into_redis_parse_err(format!(
-                    "failed to parse {} as bool, str: {}",
-                    key,
-                    rv.as_str().unwrap()
-                ))
-            })
-        })
-        .transpose()
-}
-
-fn parse_bool_required(
-    map: &'_ mut HashMap<String, RedisValue>,
-    key: &str,
-) -> Result<bool, RedisError> {
-    let v = map
-        .remove(key)
-        .ok_or_else(|| into_redis_parse_err(format!("expected {} in block submission", key)))?
-        .as_bool()
-        .ok_or_else(|| {
-            into_redis_parse_err(format!(
-                "failed to parse {} as bool, str: {}",
-                key,
-                map.get(key).unwrap().as_str().unwrap()
-            ))
-        })?;
-
-    Ok(v)
 }
 
 impl FromRedis for BlockSubmission {
