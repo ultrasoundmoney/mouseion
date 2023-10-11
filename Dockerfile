@@ -17,5 +17,5 @@ RUN cargo build --release
 # Build runtime image.
 FROM gcr.io/distroless/cc-debian12 AS runtime
 WORKDIR /app
-COPY --from=builder /app/target/release/block-submission-archiver /app/block-submission-archiver
-ENTRYPOINT ["/app/block-submission-archiver"]
+COPY --from=builder /app/target/release/mouseion /app/mouseion
+ENTRYPOINT ["/app/mouseion"]
