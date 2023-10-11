@@ -1,13 +1,12 @@
 //! # Mouseion
-//! Takes the many block submissions that the relay receives, over a message queue, bundles them
-//! by slot, and stores them in cheap Object Storage.
+//! Takes the many block submissions that the relay receives, over a Redis stream, and stores them
+//! in cheap Object Storage.
 //!
 //! ## Architecture
-//! The archiver is composed of three main components:
 //! - A component which pulls in new messages and parses them.
 //! - A component which claims pending messages and parses them.
 //! - A component which takes parsed block submissions and compresses them.
-//! - A component which takes stores the compressed block submissions in object storage.
+//! - A component which stores the compressed block submissions in object storage.
 //! - A component which acknowledges messages which have been successfully stored.
 use std::sync::Arc;
 
