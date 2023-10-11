@@ -94,8 +94,6 @@ async fn store_submissions(
     compressed_submissions_rx
         .map(Ok)
         .try_for_each_concurrent(MAX_CONCURRENCY, |(id, block_submission, json_gz_bytes)| {
-            let object_store = object_store.clone();
-            let block_counter = block_counter.clone();
             let mut stored_submissions_tx = stored_submissions_tx.clone();
             async move {
                 let result = store_submission(object_store, &block_submission, json_gz_bytes).await;
