@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::Read,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Result;
 use bytes::Bytes;
 use chrono::{Datelike, Timelike};
-use flate2::{write::GzEncoder, Compression};
+use flate2::{bufread::GzEncoder, Compression};
 use fred::{
     prelude::{RedisError, RedisErrorKind},
     types::{FromRedis, MultipleOrderedPairs, RedisKey, RedisMap, RedisValue},
@@ -295,7 +295,7 @@ impl Default for BlockSubmission {
 }
 
 impl BlockSubmission {
-    pub fn bundle_path(&self) -> Path {
+    pub fn bucket_path(&self) -> Path {
         let timestamp_micros = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("expect duration since UNIX_EPOCH to be positive regardless of clock shift")
@@ -325,10 +325,10 @@ impl BlockSubmission {
         let json_size_kb = json_str.len() / 1000;
 
         let json_gz: Bytes = spawn_blocking(move || {
-            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-            encoder.write_all(json_str.as_bytes())?;
-            let json_gz = encoder.finish()?.into();
-            Ok::<_, RedisError>(json_gz)
+            let mut encoder = GzEncoder::new(json_str.as_bytes(), Compression::default());
+            let mut json_gz = Vec::new();
+            encoder.read_to_end(&mut json_gz)?;
+            Ok::<_, RedisError>(json_gz.into())
         })
         .await??;
         let json_gz_size_kb = json_gz.len() / 1000;
