@@ -9,7 +9,6 @@ use futures::{
 use object_store as object_store_lib;
 use object_store_lib::{
     aws::{AmazonS3, AmazonS3Builder},
-    local::LocalFileSystem,
     ObjectStore, RetryConfig,
 };
 use tokio::{sync::Notify, task::JoinHandle};
@@ -22,15 +21,10 @@ use crate::{
 
 const MAX_CONCURRENCY: usize = 8;
 
-fn build_local_file_store() -> Result<LocalFileSystem> {
-    let object_store = LocalFileSystem::new_with_prefix("/tmp/")?;
-    Ok(object_store)
-}
-
-fn build_s3_store() -> Result<AmazonS3> {
-    let s3_bucket = &ENV_CONFIG.s3_bucket;
+fn build_s3_store(bucket: &str, endpoint: &str) -> Result<AmazonS3> {
     let s3_store = AmazonS3Builder::from_env()
-        .with_bucket_name(s3_bucket)
+        .with_bucket_name(bucket)
+        .with_endpoint(endpoint)
         .with_retry(RetryConfig {
             retry_timeout: std::time::Duration::from_secs(16),
             ..RetryConfig::default()
@@ -39,20 +33,20 @@ fn build_s3_store() -> Result<AmazonS3> {
     Ok(s3_store)
 }
 
-pub fn build_env_based_store() -> Result<Box<dyn ObjectStore>> {
-    if ENV_CONFIG.use_local_store {
-        info!("using local file store");
-        let store = build_local_file_store()?;
-        Ok(Box::new(store))
-    } else {
-        // We can't read directly from the s3_store so mimic what it does. No need to blow up if we
-        // fail.
-        let endpoint = std::env::var("AWS_ENDPOINT").unwrap_or("UNKNOWN".to_string());
-        let s3_bucket = &ENV_CONFIG.s3_bucket;
-        info!(endpoint, s3_bucket, "using S3 store");
-        let store = build_s3_store()?;
-        Ok(Box::new(store))
-    }
+pub fn build_submissions_store() -> Result<AmazonS3> {
+    let endpoint = std::env::var("AWS_ENDPOINT").unwrap();
+    let bucket = &ENV_CONFIG.submissions_bucket;
+    info!(endpoint, bucket, "using S3 store");
+    let store = build_s3_store(bucket, &endpoint)?;
+    Ok(store)
+}
+
+pub fn build_bundles_store() -> Result<AmazonS3> {
+    let endpoint = std::env::var("AWS_BUNDLES_ENDPOINT").unwrap();
+    let bucket = &ENV_CONFIG.bundles_bucket;
+    info!(endpoint, bucket, "using S3 store");
+    let store = build_s3_store(bucket, &endpoint)?;
+    Ok(store)
 }
 
 #[instrument(skip_all, fields(slot = %block_submission.slot(), block_hash = %block_submission.block_hash()))]
@@ -62,7 +56,7 @@ async fn store_submission(
     json_gz_bytes: Bytes,
 ) -> Result<()> {
     let result = object_store
-        .put(&block_submission.bundle_path(), json_gz_bytes)
+        .put(&block_submission.bucket_path(), json_gz_bytes)
         .await
         .context("failed to store block submission");
 
@@ -89,7 +83,7 @@ async fn store_submissions(
     compressed_submissions_rx: Receiver<IdBlockSubmissionCompressed>,
     stored_submissions_tx: Sender<String>,
 ) -> Result<()> {
-    let object_store = &build_env_based_store()?;
+    let object_store = &build_submissions_store()?;
 
     compressed_submissions_rx
         .map(Ok)

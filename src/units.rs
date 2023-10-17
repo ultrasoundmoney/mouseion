@@ -4,9 +4,11 @@ use std::{
     str::FromStr,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use lazy_static::lazy_static;
+use object_store::path::Path;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::env::{Network, ENV_CONFIG};
 
@@ -56,5 +58,20 @@ impl Slot {
 
     pub fn date_time(&self) -> DateTime<Utc> {
         self.into()
+    }
+
+    pub fn partial_s3_path(&self) -> Path {
+        let slot = self.0;
+        let slot_date_time = self.date_time();
+        let year = slot_date_time.year();
+        let month = slot_date_time.month();
+        let day = slot_date_time.day();
+        let hour = slot_date_time.hour();
+        let minute = slot_date_time.minute();
+
+        let path = format!("{year}/{month:02}/{day:02}/{hour:02}/{minute:02}/{slot}");
+        debug!(path, "built path from slot");
+
+        Path::from(path)
     }
 }

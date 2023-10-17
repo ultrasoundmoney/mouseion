@@ -1,6 +1,6 @@
 [package]
 name = "mouseion"
-version = "4.3.0"
+version = "5.3.0"
 edition = "2021"
 default-run = "archive-submissions"
 
@@ -12,6 +12,7 @@ path = "src/bin/archive-submissions.rs"
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 async-trait = "0.1.73"
 axum = "0.6.20"
+backoff = { version = "0.4.0", default-features = false, features = ["tokio"] }
 bytes = "1.4.0"
 bytes-utils = "0.1.3"
 chrono = { version = "0.4.26", default-features = false }

@@ -102,23 +102,27 @@ pub fn get_network() -> Network {
 
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
+    pub bundles_bucket: String,
     pub env: Env,
     pub log_perf: bool,
     pub network: Network,
     pub pod_name: Option<String>,
     pub redis_uri: String,
-    pub s3_bucket: String,
+    pub submissions_bucket: String,
     pub use_local_store: bool,
 }
 
 fn get_env_config() -> EnvConfig {
     EnvConfig {
+        bundles_bucket: get_env_var("AWS_BUNDLES_BUCKET")
+            .unwrap_or("block-submission-bundles-dev".to_string()),
         env: get_env(),
         log_perf: get_env_bool("LOG_PERF"),
         network: get_network(),
         pod_name: get_env_var("POD_NAME"),
         redis_uri: get_env_var_unsafe("REDIS_URI"),
-        s3_bucket: get_env_var("S3_BUCKET").unwrap_or("block-submission-archive-dev".to_string()),
+        submissions_bucket: get_env_var("S3_BUCKET")
+            .unwrap_or("block-submission-archive-dev".to_string()),
         use_local_store: get_env_bool("USE_LOCAL_STORE"),
     }
 }
