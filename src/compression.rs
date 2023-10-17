@@ -41,16 +41,14 @@ pub fn run_compression_thread(
     compressed_submissions_tx: Sender<IdBlockSubmissionCompressed>,
     shutdown_notify: Arc<Notify>,
 ) -> JoinHandle<()> {
-    tokio::spawn({
-        async move {
-            match compress_submissions(submissions_rx, compressed_submissions_tx).await {
-                Ok(()) => {
-                    info!("compression thread exiting");
-                }
-                Err(e) => {
-                    error!("compression thread exiting with error: {:?}", e);
-                    shutdown_notify.notify_waiters();
-                }
+    tokio::spawn(async move {
+        match compress_submissions(submissions_rx, compressed_submissions_tx).await {
+            Ok(()) => {
+                info!("compression thread exiting");
+            }
+            Err(e) => {
+                error!("compression thread exiting with error: {:?}", e);
+                shutdown_notify.notify_waiters();
             }
         }
     })
