@@ -2,11 +2,11 @@
 name = "mouseion"
 version = "4.3.0"
 edition = "2021"
-default-run = "mouseion"
+default-run = "archive-submissions"
 
 [[bin]]
-name = "mouseion"
-path = "src/main.rs"
+name = "archive-submissions"
+path = "src/bin/archive-submissions.rs"
 
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
