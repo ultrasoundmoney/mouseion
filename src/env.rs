@@ -75,8 +75,16 @@ pub fn get_env() -> Env {
     }
 }
 
-pub fn get_env_bool(key: &str) -> bool {
-    get_env_var(key).map_or(false, |var| var.to_lowercase() == "true")
+pub fn get_env_bool(key: &str) -> Option<bool> {
+    get_env_var(key).map(|var| match var.to_lowercase().as_str() {
+        "true" => true,
+        "false" => false,
+        "t" => true,
+        "f" => false,
+        "1" => true,
+        "0" => false,
+        _ => panic!("env var {key} is not a bool"),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +112,7 @@ pub fn get_network() -> Network {
 pub struct EnvConfig {
     pub bundles_bucket: String,
     pub env: Env,
+    pub log_json: bool,
     pub log_perf: bool,
     pub network: Network,
     pub pod_name: Option<String>,
@@ -117,13 +126,14 @@ fn get_env_config() -> EnvConfig {
         bundles_bucket: get_env_var("AWS_BUNDLES_BUCKET")
             .unwrap_or("block-submission-bundles-dev".to_string()),
         env: get_env(),
-        log_perf: get_env_bool("LOG_PERF"),
+        log_json: get_env_bool("LOG_JSON").unwrap_or(get_env() != Env::Dev),
+        log_perf: get_env_bool("LOG_PERF").unwrap_or(false),
         network: get_network(),
         pod_name: get_env_var("POD_NAME"),
         redis_uri: get_env_var_unsafe("REDIS_URI"),
         submissions_bucket: get_env_var("S3_BUCKET")
             .unwrap_or("block-submission-archive-dev".to_string()),
-        use_local_store: get_env_bool("USE_LOCAL_STORE"),
+        use_local_store: get_env_bool("USE_LOCAL_STORE").unwrap_or(false),
     }
 }
 
@@ -162,7 +172,7 @@ mod tests {
     #[test]
     fn test_get_env_bool_not_there() {
         let flag = get_env_bool("DOESNT_EXIST");
-        assert!(!flag);
+        assert_eq!(flag, None);
     }
 
     #[test]
@@ -170,7 +180,7 @@ mod tests {
         let test_key = "TEST_KEY_BOOL_TRUE";
         let test_value = "true";
         std::env::set_var(test_key, test_value);
-        assert!(get_env_bool(test_key));
+        assert_eq!(get_env_bool(test_key), Some(true));
     }
 
     #[test]
@@ -178,7 +188,7 @@ mod tests {
         let test_key = "TEST_KEY_BOOL_TRUE2";
         let test_value = "TRUE";
         std::env::set_var(test_key, test_value);
-        assert!(get_env_bool(test_key));
+        assert_eq!(get_env_bool(test_key), Some(true));
     }
 
     #[test]
@@ -186,7 +196,7 @@ mod tests {
         let test_key = "TEST_KEY_BOOL_FALSE";
         let test_value = "false";
         std::env::set_var(test_key, test_value);
-        assert!(!get_env_bool(test_key));
+        assert_eq!(get_env_bool(test_key), Some(false));
     }
 
     #[test]

@@ -9,7 +9,7 @@ pub fn init() {
         FmtSpan::NONE
     };
 
-    if ENV_CONFIG.env == Env::Dev {
+    if ENV_CONFIG.log_json {
         tracing_subscriber::fmt()
             .with_span_events(span_format)
             .with_env_filter(EnvFilter::from_default_env())
