@@ -13,11 +13,11 @@ use futures::{
 use lazy_static::lazy_static;
 use mouseion::{env::ENV_CONFIG, log, object_store, units::Slot, BlockSubmission};
 use object_store_lib::aws::AmazonS3;
-use object_store_lib::ObjectMeta;
 use object_store_lib::{path::Path, ObjectStore};
+use tokio::sync::Semaphore;
 use tokio::task::spawn_blocking;
 use tokio::{spawn, task::JoinHandle};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 type ObjectPath = object_store_lib::path::Path;
 
@@ -27,7 +27,6 @@ lazy_static! {
 
 // Make sure not to bundle the current slot as we might create incomplete bundles.
 const SLOT_LIMIT: i32 = 7562638;
-
 const SLOT_MEMORY: usize = 32;
 
 async fn discover_slots(object_store: &AmazonS3, mut slots_tx: Sender<Slot>) -> anyhow::Result<()> {
@@ -78,18 +77,27 @@ fn run_discover_slots_thread(
     let object_store = object_store.clone();
     spawn(async move {
         match discover_slots(object_store.as_ref(), slots_tx).await {
-            Ok(_) => {}
-            Err(e) => {
-                println!("discover_slots_loop failed: {:?}", e);
-            }
+            Ok(_) => info!("finished discovering slots"),
+            Err(e) => panic!("discover_slots failed: {:?}", e),
         };
     })
 }
 
-#[instrument(skip(object_store))]
-async fn bundle_slot(object_store: &AmazonS3, slot: Slot) -> anyhow::Result<Vec<BlockSubmission>> {
+/// Does three things given a slot.
+/// 1. Fetch all block submissions for the slot.
+/// 2. Decompress them.
+/// 3. Bundle them together in a Vec.
+#[instrument(skip(object_store), fields(%slot))]
+async fn bundle_slot(
+    object_store: Arc<AmazonS3>,
+    slot: Slot,
+) -> anyhow::Result<Vec<BlockSubmission>> {
     let path = slot.partial_s3_path();
+
+    debug!(%path, "fetching all submissions for slot");
+
     let mut block_submission_meta_stream = object_store.list(Some(&path)).await?;
+
     let mut block_submissions = Vec::new();
 
     while let Some(block_submission_meta) = block_submission_meta_stream.try_next().await? {
@@ -100,33 +108,46 @@ async fn bundle_slot(object_store: &AmazonS3, slot: Slot) -> anyhow::Result<Vec<
             .await?;
 
         let decoder = flate2::read::GzDecoder::new(&bytes_gz[..]);
-
         let block_submission: BlockSubmission = serde_json::from_reader(decoder)?;
+
+        trace!(
+            block_hash = block_submission.block_hash(),
+            "fetched block submission"
+        );
+
         block_submissions.push(block_submission);
     }
 
-    debug!(%slot, "bundled slot");
+    debug!("fetched all bundles for slot");
+
+    if block_submissions.is_empty() {
+        warn!("no submissions found for slot");
+    }
 
     Ok(block_submissions)
 }
 
+const FETCH_BUNDLE_CONCURRENCY: usize = 8;
+
 fn run_bundle_slots_thread(
     object_store: Arc<AmazonS3>,
-    mut slots_rx: Receiver<Slot>,
+    slots_rx: Receiver<Slot>,
     bundles_tx: Sender<(Slot, Vec<BlockSubmission>)>,
 ) -> JoinHandle<()> {
     spawn(async move {
-        while let Some(slot) = slots_rx.next().await {
-            let mut bundles_tx = bundles_tx.clone();
-            match bundle_slot(object_store.as_ref(), slot).await {
-                Ok(bundle) => {
-                    bundles_tx.send((slot, bundle)).await.unwrap();
+        slots_rx
+            .map(Ok)
+            .try_for_each_concurrent(FETCH_BUNDLE_CONCURRENCY, |slot| {
+                let object_store = object_store.clone();
+                let mut bundles_tx = bundles_tx.clone();
+                async move {
+                    let bundle = bundle_slot(object_store, slot).await?;
+                    bundles_tx.send((slot, bundle)).await?;
+                    Ok::<_, anyhow::Error>(())
                 }
-                Err(e) => {
-                    println!("bundle_slot failed: {:?}", e);
-                }
-            };
-        }
+            })
+            .await
+            .unwrap();
     })
 }
 
@@ -142,8 +163,8 @@ fn bundle_path_from_slot(slot: Slot) -> Path {
     Path::from(path_string)
 }
 
-#[instrument(skip(bundle))]
-async fn compress_bundle(bundle: Vec<BlockSubmission>) -> anyhow::Result<Bytes> {
+#[instrument(skip(bundle), fields(%slot))]
+async fn compress_bundle(bundle: Vec<BlockSubmission>, slot: Slot) -> anyhow::Result<Bytes> {
     // convert each block submission to a json string, then join them with newline
     let ndjson: String = bundle
         .into_iter()
@@ -170,46 +191,52 @@ async fn compress_bundle(bundle: Vec<BlockSubmission>) -> anyhow::Result<Bytes> 
     })
     .await??;
 
+    debug!("compressed bundle");
+
     Ok(bytes_gz)
 }
+
+const COMPRESSION_CONCURRENCY: usize = 8;
 
 fn run_compression_thread(
     mut bundles_rx: Receiver<(Slot, Vec<BlockSubmission>)>,
     compressed_bundles_tx: Sender<(Slot, ObjectPath, Bytes)>,
 ) -> JoinHandle<()> {
+    let semaphore = Arc::new(Semaphore::new(COMPRESSION_CONCURRENCY));
     spawn(async move {
         while let Some((slot, bundle)) = bundles_rx.next().await {
             let mut compressed_bundles_tx = compressed_bundles_tx.clone();
-            match compress_bundle(bundle).await {
-                Ok(bytes_gz) => {
-                    debug!(%slot, "compressed bundle");
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            spawn(async move {
+                match compress_bundle(bundle, slot).await {
+                    Ok(bytes_gz) => {
+                        let path = bundle_path_from_slot(slot);
 
-                    let path = bundle_path_from_slot(slot);
-
-                    compressed_bundles_tx
-                        .send((slot, path, bytes_gz))
-                        .await
-                        .unwrap();
+                        compressed_bundles_tx
+                            .send((slot, path, bytes_gz))
+                            .await
+                            .unwrap();
+                    }
+                    Err(e) => {
+                        panic!("compress_bundle failed: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    println!("compress_bundle failed: {:?}", e);
-                }
-            };
+                drop(permit);
+            });
         }
+
+        info!("finished compressing bundles");
     })
 }
 
-#[instrument(skip(bundle_gz, object_store, slots_to_delete_tx) fields(path = path.to_string()))]
+#[instrument(skip(bundle_gz, object_store), fields(path = path.to_string(), %slot))]
 async fn store_bundle(
     bundle_gz: Bytes,
     object_store: &AmazonS3,
     path: ObjectPath,
     slot: Slot,
-    mut slots_to_delete_tx: Sender<Slot>,
 ) -> anyhow::Result<()> {
-    // Store the bundle
     backoff::future::retry(ExponentialBackoff::default(), || async {
-        dbg!(&path);
         object_store
             .put(&path, bundle_gz.clone())
             .await
@@ -228,8 +255,7 @@ async fn store_bundle(
     })
     .await?;
 
-    // Delete the source files
-    slots_to_delete_tx.send(slot).await.unwrap();
+    debug!("stored bundle");
 
     Ok(())
 }
@@ -237,41 +263,28 @@ async fn store_bundle(
 fn run_store_bundles_thread(
     bundles_stroe: AmazonS3,
     mut compressed_bundles_rx: Receiver<(Slot, ObjectPath, Bytes)>,
-    slots_to_delete_tx: Sender<Slot>,
+    mut slots_to_delete_tx: Sender<Slot>,
 ) -> JoinHandle<()> {
     spawn(async move {
         while let Some((slot, path, bundle_gz)) = compressed_bundles_rx.next().await {
-            match store_bundle(
-                bundle_gz,
-                &bundles_stroe,
-                path,
-                slot,
-                slots_to_delete_tx.clone(),
-            )
-            .await
-            {
-                Ok(_) => {}
+            match store_bundle(bundle_gz, &bundles_stroe, path, slot).await {
+                Ok(_) => slots_to_delete_tx.send(slot).await.unwrap(),
                 Err(e) => {
-                    println!("store_bundle failed: {:?}", e);
+                    panic!("store_bundle failed: {:?}", e);
                 }
             };
         }
     })
 }
 
-#[instrument(skip(object_store))]
-async fn delete_slot(object_store: &AmazonS3, slot: Slot) -> anyhow::Result<()> {
+#[instrument(skip(object_store), fields(%slot))]
+async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<()> {
     let path = slot.partial_s3_path();
+    let mut block_submission_meta_stream = object_store.list(Some(&path)).await?;
 
-    let mut block_submission_meta_stream = object_store
-        .list(Some(&path))
-        .await?
-        .map(|meta: Result<ObjectMeta, _>| meta.map(|m| m.location))
-        .boxed();
-
-    while let Some(location) = block_submission_meta_stream.try_next().await? {
-        debug!(%location, "deleting submission");
-        object_store.delete(&location).await?;
+    while let Some(object_meta) = block_submission_meta_stream.try_next().await? {
+        trace!(location = %object_meta.location, "deleting submission");
+        object_store.delete(&object_meta.location).await?;
     }
 
     debug!("deleted all submissions for slot");
@@ -279,14 +292,21 @@ async fn delete_slot(object_store: &AmazonS3, slot: Slot) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn run_delete_source_thread(
+const DELETE_SLOT_CONCURRENCY: usize = 8;
+
+fn run_clean_source_submissions_thread(
     object_store: Arc<AmazonS3>,
-    mut slots_to_delete_rx: Receiver<Slot>,
+    slots_to_delete_rx: Receiver<Slot>,
 ) -> JoinHandle<()> {
     spawn(async move {
-        while let Some(slot) = slots_to_delete_rx.next().await {
-            delete_slot(object_store.as_ref(), slot).await.unwrap();
-        }
+        slots_to_delete_rx
+            .map(Ok)
+            .try_for_each_concurrent(DELETE_SLOT_CONCURRENCY, |slot| {
+                let object_store = object_store.clone();
+                delete_slot(object_store, slot)
+            })
+            .await
+            .unwrap();
     })
 }
 
@@ -294,27 +314,29 @@ fn run_delete_source_thread(
 pub async fn main() -> anyhow::Result<()> {
     log::init();
 
-    info!("starting bundle-submissions");
+    info!("starting to bundle submissions");
 
     let submissions_store = Arc::new(object_store::build_submissions_store()?);
 
     let bundles_store = object_store::build_bundles_store()?;
 
-    let (slots_tx, slots_rx) = channel(4);
+    let (slots_tx, slots_rx) = channel(8);
 
-    let (bundles_tx, bundles_rx) = channel(4);
+    let (bundles_tx, bundles_rx) = channel(8);
 
-    let (compressed_bundles_tx, compressed_bundles_rx) = channel(4);
+    let (compressed_bundles_tx, compressed_bundles_rx) = channel(8);
 
-    let (slots_to_delete_tx, slots_to_delete_rx) = channel(2);
+    let (slots_to_delete_tx, slots_to_delete_rx) = channel(8);
 
     try_join!(
         run_discover_slots_thread(submissions_store.clone(), slots_tx),
         run_bundle_slots_thread(submissions_store.clone(), slots_rx, bundles_tx),
         run_compression_thread(bundles_rx, compressed_bundles_tx),
         run_store_bundles_thread(bundles_store, compressed_bundles_rx, slots_to_delete_tx),
-        run_delete_source_thread(submissions_store.clone(), slots_to_delete_rx)
+        run_clean_source_submissions_thread(submissions_store, slots_to_delete_rx)
     )?;
+
+    info!("finished bundling submissions");
 
     Ok(())
 }
