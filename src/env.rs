@@ -118,12 +118,11 @@ pub struct EnvConfig {
     pub pod_name: Option<String>,
     pub redis_uri: String,
     pub submissions_bucket: String,
-    pub use_local_store: bool,
 }
 
 fn get_env_config() -> EnvConfig {
     EnvConfig {
-        bundles_bucket: get_env_var("AWS_BUNDLES_BUCKET")
+        bundles_bucket: get_env_var("BUNDLES_BUCKET")
             .unwrap_or("block-submission-bundles-dev".to_string()),
         env: get_env(),
         log_json: get_env_bool("LOG_JSON").unwrap_or(get_env() != Env::Dev),
@@ -131,9 +130,8 @@ fn get_env_config() -> EnvConfig {
         network: get_network(),
         pod_name: get_env_var("POD_NAME"),
         redis_uri: get_env_var_unsafe("REDIS_URI"),
-        submissions_bucket: get_env_var("S3_BUCKET")
+        submissions_bucket: get_env_var("SUBMISSIONS_BUCKET")
             .unwrap_or("block-submission-archive-dev".to_string()),
-        use_local_store: get_env_bool("USE_LOCAL_STORE").unwrap_or(false),
     }
 }
 

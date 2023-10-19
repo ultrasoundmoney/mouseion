@@ -18,10 +18,25 @@ services:
       - NETWORK=mainnet
       - REDIS_URI=redis://redis:6379
       - RUST_LOG=archive_submissions=debug
-      - S3_BUCKET=block-submission-archive-dev
-      - USE_LOCAL_STORE=false
+      - SUBMISSIONS_BUCKET=block-submission-archive-dev
     depends_on:
       - redis
+
+  bundle-submissions:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - AWS_ACCESS_KEY_ID=3a7f56c872164eeb9ea200823ad7b403
+      - AWS_DEFAULT_REGION=GRA
+      - AWS_ENDPOINT=https://s3.gra.perf.cloud.ovh.net/
+      - AWS_SECRET_ACCESS_KEY
+      - BUNDLES_BUCKET=block-submission-bundles-dev
+      - ENV=dev
+      - NETWORK=mainnet
+      - REDIS_URI=redis://redis:6379
+      - RUST_LOG=archive_submissions=debug
+      - SUBMISSIONS_BUCKET=block-submission-archive-dev
 
   sim-submissions:
     build:
