@@ -19,8 +19,7 @@ use tracing::{debug, instrument};
 
 use crate::{
     redis_decoding::{
-        parse_bool_optional, parse_bool_required, parse_string_optional, parse_string_required,
-        parse_u64_optional, parse_u64_required,
+        parse_bool_optional, parse_string_optional, parse_u64_optional, parse_u64_required,
     },
     units::Slot,
 };
@@ -56,13 +55,13 @@ pub struct BlockSubmission {
     execution_payload_size: Option<u64>,
     http_encoding: Option<String>,
     pub payload: serde_json::Value,
-    payload_encoding: String,
+    payload_encoding: Option<String>,
     received_at: u64,
-    safe_to_propose: bool,
+    safe_to_propose: Option<bool>,
     sim_optimistic: Option<bool>,
     sim_request_error: Option<String>,
     sim_validation_error: Option<String>,
-    sim_was_simulated: bool,
+    sim_was_simulated: Option<bool>,
     // A status code is not always available. Both historically, and because builder-api doesn't
     // always provide one.
     status_code: Option<u16>,
@@ -104,15 +103,28 @@ impl From<BlockSubmission> for MultipleOrderedPairs {
             ),
             (
                 "safe_to_propose".into(),
-                RedisValue::Boolean(entry.safe_to_propose),
+                RedisValue::Boolean(
+                    entry
+                        .safe_to_propose
+                        .expect("safe_to_propose is required when publishing"),
+                ),
             ),
             (
                 "sim_was_simulated".into(),
-                RedisValue::Boolean(entry.sim_was_simulated),
+                RedisValue::Boolean(
+                    entry
+                        .sim_was_simulated
+                        .expect("sim_was_simulated is required when publishing"),
+                ),
             ),
             (
                 "payload_encoding".into(),
-                RedisValue::String(entry.payload_encoding.into()),
+                RedisValue::String(
+                    entry
+                        .payload_encoding
+                        .expect("payload_encoding is required when publishing")
+                        .into(),
+                ),
             ),
         ];
 
@@ -185,13 +197,13 @@ impl FromRedis for BlockSubmission {
         let eligible_at = parse_u64_optional(&mut map, "eligible_at")?;
         let execution_payload_size = parse_u64_optional(&mut map, "execution_payload_size")?;
         let http_encoding = parse_string_optional(&mut map, "http_encoding")?;
-        let payload_encoding = parse_string_required(&mut map, "payload_encoding")?;
+        let payload_encoding = parse_string_optional(&mut map, "payload_encoding")?;
         let received_at = parse_u64_required(&mut map, "received_at")?;
-        let safe_to_propose = parse_bool_required(&mut map, "safe_to_propose")?;
+        let safe_to_propose = parse_bool_optional(&mut map, "safe_to_propose")?;
         let sim_optimistic = parse_bool_optional(&mut map, "sim_optimistic")?;
         let sim_request_error = parse_string_optional(&mut map, "sim_request_error")?;
         let sim_validation_error = parse_string_optional(&mut map, "sim_validation_error")?;
-        let sim_was_simulated = parse_bool_required(&mut map, "sim_was_simulated")?;
+        let sim_was_simulated = parse_bool_optional(&mut map, "sim_was_simulated")?;
         let status_code = parse_u64_optional(&mut map, "status_code")?.map(|v| v as u16);
         let user_agent = parse_string_optional(&mut map, "user_agent")?;
 
@@ -266,7 +278,11 @@ impl From<BlockSubmission> for RedisValue {
         }
         map.insert(
             "sim_was_simulated".into(),
-            RedisValue::Boolean(entry.sim_was_simulated),
+            RedisValue::Boolean(
+                entry
+                    .sim_was_simulated
+                    .expect("sim_was_simulated is required when publishing"),
+            ),
         );
         RedisMap::try_from(map).map(RedisValue::Map).unwrap()
     }
@@ -281,13 +297,13 @@ impl Default for BlockSubmission {
             execution_payload_size: None,
             http_encoding: None,
             payload: serde_json::Value::Null,
-            payload_encoding: "json".to_string(),
+            payload_encoding: Some("json".to_string()),
             received_at: 0,
-            safe_to_propose: false,
+            safe_to_propose: Some(false),
             sim_optimistic: None,
             sim_request_error: None,
             sim_validation_error: None,
-            sim_was_simulated: false,
+            sim_was_simulated: Some(false),
             status_code: None,
             user_agent: None,
         }
