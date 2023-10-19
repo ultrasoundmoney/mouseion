@@ -1,6 +1,6 @@
 use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 
-use crate::env::{Env, ENV_CONFIG};
+use crate::env::ENV_CONFIG;
 
 pub fn init() {
     let span_format = if ENV_CONFIG.log_perf {
