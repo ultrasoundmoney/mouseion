@@ -45,7 +45,7 @@ pub async fn main() -> anyhow::Result<()> {
     let from = std::env::args().nth(1);
 
     try_join!(
-        run_discover_slots_thread(from.as_deref(), submissions_store.clone(), slots_tx),
+        run_discover_slots_thread(from, submissions_store.clone(), slots_tx),
         run_bundle_slots_thread(submissions_store.clone(), slots_rx, bundles_tx),
         run_compression_thread(bundles_rx, compressed_bundles_tx),
         run_store_bundles_thread(bundles_store, compressed_bundles_rx, slots_to_delete_tx),

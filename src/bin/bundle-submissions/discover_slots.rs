@@ -15,11 +15,11 @@ const SLOT_LIMIT: i32 = 7562638;
 const SLOT_MEMORY: usize = 32;
 
 async fn discover_slots(
-    from: Option<&str>,
+    from: Option<String>,
     object_store: &AmazonS3,
     mut slots_tx: Sender<Slot>,
 ) -> anyhow::Result<()> {
-    let path = from.unwrap_or("/2023");
+    let path = from.as_deref().unwrap_or("/2023");
     let mut block_submission_meta_stream =
         object_store.list(Some(&Path::from(path))).await.unwrap();
 
@@ -61,7 +61,7 @@ async fn discover_slots(
 }
 
 pub fn run_discover_slots_thread(
-    from: Option<&str>,
+    from: Option<String>,
     object_store: Arc<AmazonS3>,
     slots_tx: Sender<Slot>,
 ) -> JoinHandle<()> {
