@@ -1,3 +1,4 @@
+use anyhow::Context;
 use backoff::ExponentialBackoff;
 use bytes::Bytes;
 use futures::{
@@ -22,15 +23,18 @@ async fn store_bundle(
         object_store
             .put(&path, bundle_gz.clone())
             .await
+            .context("failed to execute OVH put operation")
             .map_err(|err| {
-                if err.to_string().contains("409 Conflict") {
+                if err.to_string().contains("409 Conflict")
+                    || err.to_string().contains("connection closed")
+                {
                     warn!("failed to execute OVH put operation: {}, retrying", err);
                     backoff::Error::Transient {
                         err,
                         retry_after: None,
                     }
                 } else {
-                    error!("failed to execute OVH put operation: {}", err);
+                    error!("{}", err);
                     backoff::Error::Permanent(err)
                 }
             })
