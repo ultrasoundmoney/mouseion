@@ -14,9 +14,14 @@ const SLOT_LIMIT: i32 = 7562638;
 
 const SLOT_MEMORY: usize = 32;
 
-async fn discover_slots(object_store: &AmazonS3, mut slots_tx: Sender<Slot>) -> anyhow::Result<()> {
+async fn discover_slots(
+    from: Option<&str>,
+    object_store: &AmazonS3,
+    mut slots_tx: Sender<Slot>,
+) -> anyhow::Result<()> {
+    let path = from.unwrap_or("/2023");
     let mut block_submission_meta_stream =
-        object_store.list(Some(&Path::from("/2023"))).await.unwrap();
+        object_store.list(Some(&Path::from(path))).await.unwrap();
 
     let mut last_sent_slots: VecDeque<Slot> = VecDeque::with_capacity(SLOT_MEMORY);
     let mut last_sent_slots_set: HashSet<Slot> = HashSet::with_capacity(SLOT_MEMORY);
@@ -56,12 +61,13 @@ async fn discover_slots(object_store: &AmazonS3, mut slots_tx: Sender<Slot>) -> 
 }
 
 pub fn run_discover_slots_thread(
+    from: Option<&str>,
     object_store: Arc<AmazonS3>,
     slots_tx: Sender<Slot>,
 ) -> JoinHandle<()> {
     let object_store = object_store.clone();
     spawn(async move {
-        match discover_slots(object_store.as_ref(), slots_tx).await {
+        match discover_slots(from, object_store.as_ref(), slots_tx).await {
             Ok(_) => info!("finished discovering slots"),
             Err(e) => panic!("discover_slots failed: {:?}", e),
         };
