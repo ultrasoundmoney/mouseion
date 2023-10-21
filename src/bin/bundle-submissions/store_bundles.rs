@@ -27,6 +27,9 @@ async fn store_bundle(
             .map_err(|err| {
                 if err.to_string().contains("409 Conflict")
                     || err.to_string().contains("connection closed")
+                    || err
+                        .to_string()
+                        .contains("connection closed before message completed")
                 {
                     warn!("failed to execute OVH put operation: {}, retrying", err);
                     backoff::Error::Transient {
