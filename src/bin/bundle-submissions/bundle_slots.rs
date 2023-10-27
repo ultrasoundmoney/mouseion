@@ -27,11 +27,16 @@ async fn bundle_slot(
     let mut block_submissions = Vec::new();
 
     while let Some(block_submission_meta) = block_submission_meta_stream.try_next().await? {
-        let bytes_gz = object_store
-            .get(&block_submission_meta.location)
-            .await?
-            .bytes()
-            .await?;
+        let get_with_retry = || async {
+            let bytes = object_store
+                .get(&block_submission_meta.location)
+                .await?
+                .bytes()
+                .await?;
+            Ok(bytes)
+        };
+        let bytes_gz =
+            backoff::future::retry(backoff::ExponentialBackoff::default(), get_with_retry).await?;
 
         let decoder = flate2::read::GzDecoder::new(&bytes_gz[..]);
         let block_submission: BlockSubmission = serde_json::from_reader(decoder)?;
