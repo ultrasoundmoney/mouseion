@@ -50,7 +50,7 @@ async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<
     Ok(())
 }
 
-const DELETE_SLOT_CONCURRENCY: usize = 8;
+const DELETE_SLOT_CONCURRENCY: usize = 16;
 
 pub fn run_delete_source_submissions_thread(
     object_store: Arc<AmazonS3>,

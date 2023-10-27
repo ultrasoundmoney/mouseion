@@ -34,13 +34,13 @@ pub async fn main() -> anyhow::Result<()> {
 
     let bundles_store = object_store::build_bundles_store()?;
 
-    let (slots_tx, slots_rx) = channel(8);
+    let (slots_tx, slots_rx) = channel(16);
 
-    let (bundles_tx, bundles_rx) = channel(8);
+    let (bundles_tx, bundles_rx) = channel(32);
 
     let (compressed_bundles_tx, compressed_bundles_rx) = channel(8);
 
-    let (slots_to_delete_tx, slots_to_delete_rx) = channel(8);
+    let (slots_to_delete_tx, slots_to_delete_rx) = channel(16);
 
     let from = std::env::args().nth(1);
 
