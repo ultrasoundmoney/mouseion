@@ -1,12 +1,13 @@
 use std::{
     collections::{HashSet, VecDeque},
     sync::Arc,
+    time::Duration,
 };
 
 use futures::{channel::mpsc::Sender, SinkExt, StreamExt, TryStreamExt};
 use mouseion::units::Slot;
 use object_store::{aws::AmazonS3, path::Path, ObjectStore};
-use tokio::{spawn, task::JoinHandle};
+use tokio::{spawn, task::JoinHandle, time::sleep};
 use tracing::{debug, info, warn};
 
 // Make sure not to bundle the current slot as we might create incomplete bundles.
@@ -14,7 +15,10 @@ const SLOT_LIMIT: i32 = 7562638;
 
 const SLOT_MEMORY: usize = 32;
 
-async fn discover_next_day(from: Option<String>, object_store: &AmazonS3) -> anyhow::Result<i32> {
+async fn discover_next_day(
+    from: Option<String>,
+    object_store: &AmazonS3,
+) -> anyhow::Result<(i32, i32)> {
     let path = from.as_deref().unwrap_or("/2023");
     let mut block_submission_meta_stream =
         object_store.list(Some(&Path::from(path))).await.unwrap();
@@ -23,6 +27,12 @@ async fn discover_next_day(from: Option<String>, object_store: &AmazonS3) -> any
         .await
         .expect("non-empty stream")?;
     let path_str = first.location.to_string();
+    let month = path_str
+        .split('/')
+        .nth(1)
+        .expect("failed to find second '/' delimited string")
+        .parse::<i32>()
+        .expect("failed to parse string segment as month");
     let day = path_str
         .split('/')
         .nth(2)
@@ -30,10 +40,11 @@ async fn discover_next_day(from: Option<String>, object_store: &AmazonS3) -> any
         .parse::<i32>()
         .expect("failed to parse string segment as day");
 
-    Ok(day)
+    Ok((month, day))
 }
 
 async fn discover_slots_for_day(
+    month: i32,
     day: i32,
     object_store: &AmazonS3,
     mut slots_tx: Sender<Slot>,
@@ -41,7 +52,7 @@ async fn discover_slots_for_day(
     // Create 24 streams, one for each hour.
     let mut hour_streams = Vec::with_capacity(24);
     for hour in 0..24 {
-        let path = format!("/2023/{:02}/{:02}", day, hour);
+        let path = format!("/2023/{:02}/{:02}/{:02}", month, day, hour);
         let block_submission_meta_stream =
             object_store.list(Some(&Path::from(path))).await.unwrap();
         hour_streams.push(block_submission_meta_stream);
@@ -54,12 +65,13 @@ async fn discover_slots_for_day(
     let mut hour_index = 0;
     loop {
         let block_submission_meta_stream = &mut hour_streams[hour_index];
-        hour_index = (hour_index + 1) % 24;
-
         let block_submission_meta = block_submission_meta_stream.try_next().await?;
 
         if block_submission_meta.is_none() {
-            // We have reached the end of the stream for this hour, continue with the others.
+            // We have reached the end of the stream for this hour, remove it from the set and
+            // continue with the others.
+            debug!(%hour_index, len = hour_streams.len(), "finished stream");
+            hour_streams.remove(hour_index);
             continue;
         }
 
@@ -93,9 +105,32 @@ async fn discover_slots_for_day(
                 last_sent_slots_set.remove(&oldest_slot);
             }
         }
+
+        hour_index = (hour_index + 1) % hour_streams.len();
     }
 
     Ok(())
+}
+async fn discover_slots(
+    from: Option<String>,
+    object_store: &AmazonS3,
+    slots_tx: Sender<Slot>,
+) -> anyhow::Result<()> {
+    loop {
+        // Decide which day to work on.
+        let (month, day) = match discover_next_day(from.clone(), object_store).await {
+            Ok((month, day)) => (month, day),
+            Err(e) => panic!("discover_next_day failed: {:?}", e),
+        };
+        debug!(%month, %day, "discovered month, day to bundle");
+
+        discover_slots_for_day(month, day, object_store, slots_tx.clone()).await?;
+
+        info!(month, day, "finished discovering slots for month, day");
+
+        // Sleep to avoid busy loop.
+        sleep(Duration::from_secs(1)).await;
+    }
 }
 
 pub fn run_discover_slots_thread(
@@ -105,13 +140,7 @@ pub fn run_discover_slots_thread(
 ) -> JoinHandle<()> {
     let object_store = object_store.clone();
     spawn(async move {
-        // Decide which day to work on.
-        let day = match discover_next_day(from, object_store.as_ref()).await {
-            Ok(day) => day,
-            Err(e) => panic!("discover_next_day failed: {:?}", e),
-        };
-        debug!(%day, "discovered day");
-        match discover_slots_for_day(day, object_store.as_ref(), slots_tx).await {
+        match discover_slots(from, object_store.as_ref(), slots_tx).await {
             Ok(_) => info!("finished discovering slots"),
             Err(e) => panic!("discover_slots failed: {:?}", e),
         };
