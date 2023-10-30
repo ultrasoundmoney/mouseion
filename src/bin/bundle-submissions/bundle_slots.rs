@@ -28,11 +28,12 @@ async fn bundle_slot(
 
     while let Some(block_submission_meta) = block_submission_meta_stream.try_next().await? {
         let get_with_retry = || async {
-            let bytes = object_store
-                .get(&block_submission_meta.location)
-                .await?
-                .bytes()
-                .await?;
+            let location = &block_submission_meta.location;
+            trace!(
+                location = location.to_string(),
+                "attempting to get block submission with retry"
+            );
+            let bytes = object_store.get(location).await?.bytes().await?;
             Ok(bytes)
         };
         let bytes_gz =
