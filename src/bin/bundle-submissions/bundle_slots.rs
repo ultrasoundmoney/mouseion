@@ -55,7 +55,7 @@ async fn bundle_slot(
     Ok(block_submissions)
 }
 
-const FETCH_BUNDLE_CONCURRENCY: usize = 32;
+const FETCH_BUNDLE_CONCURRENCY: usize = 16;
 
 pub fn run_bundle_slots_thread(
     object_store: Arc<AmazonS3>,
