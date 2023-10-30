@@ -66,20 +66,21 @@ const COMPRESSION_CONCURRENCY: usize = 8;
 
 pub fn run_compression_thread(
     mut bundles_rx: Receiver<(Slot, Vec<BlockSubmission>)>,
-    compressed_bundles_tx: Sender<(Slot, ObjectPath, Bytes)>,
+    compressed_bundles_tx: Sender<(Bytes, usize, ObjectPath, Slot)>,
 ) -> JoinHandle<()> {
     let semaphore = Arc::new(Semaphore::new(COMPRESSION_CONCURRENCY));
     spawn(async move {
         while let Some((slot, bundle)) = bundles_rx.next().await {
             let mut compressed_bundles_tx = compressed_bundles_tx.clone();
             let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let count = bundle.len();
             spawn(async move {
                 match compress_bundle(bundle, slot).await {
                     Ok(bytes_gz) => {
                         let path = bundle_path_from_slot(slot);
 
                         compressed_bundles_tx
-                            .send((slot, path, bytes_gz))
+                            .send((bytes_gz, count, path, slot))
                             .await
                             .unwrap();
                     }

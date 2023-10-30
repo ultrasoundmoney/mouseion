@@ -51,14 +51,17 @@ async fn store_bundle(
 
 pub fn run_store_bundles_thread(
     bundles_stroe: AmazonS3,
-    mut compressed_bundles_rx: Receiver<(Slot, ObjectPath, Bytes)>,
+    mut compressed_bundles_rx: Receiver<(Bytes, usize, ObjectPath, Slot)>,
     mut slots_to_delete_tx: Sender<Slot>,
 ) -> JoinHandle<()> {
     spawn(async move {
         let mut count = 0;
+        let mut payload_count = 0;
         let start = SystemTime::now();
 
-        while let Some((slot, path, bundle_gz)) = compressed_bundles_rx.next().await {
+        while let Some((bundle_gz, compressed_bundle_payload_count, path, slot)) =
+            compressed_bundles_rx.next().await
+        {
             match store_bundle(bundle_gz, &bundles_stroe, path, slot).await {
                 Ok(_) => slots_to_delete_tx.send(slot).await.unwrap(),
                 Err(e) => {
@@ -67,11 +70,16 @@ pub fn run_store_bundles_thread(
             };
 
             count += 1;
+            payload_count += compressed_bundle_payload_count;
 
             if count % 10 == 0 {
                 let elapsed = SystemTime::now().duration_since(start).unwrap();
                 let rate = count as f64 / elapsed.as_secs_f64();
-                info!("stored {} bundles at {:.2} bundles/sec", count, rate);
+                let payload_rate = payload_count as f64 / elapsed.as_secs_f64();
+                info!(
+                    "stored {} bundles at {:.2} bundles/sec, {:.2} payloads/sec",
+                    count, rate, payload_rate
+                );
             }
         }
     })
