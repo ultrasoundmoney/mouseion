@@ -13,7 +13,7 @@ RUN cargo build --release
 RUN sed -i 's#dummy.rs#src/bin/archive-submissions.rs#' Cargo.toml
 COPY src ./src
 RUN cargo build --release --bin archive-submissions
-RUN carge build --release --bin bundle-submissions
+RUN cargo build --release --bin bundle-submissions
 
 # Build runtime image.
 FROM gcr.io/distroless/cc-debian12 AS runtime
