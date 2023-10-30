@@ -13,12 +13,12 @@ pub fn init() {
         tracing_subscriber::fmt()
             .with_span_events(span_format)
             .with_env_filter(EnvFilter::from_default_env())
+            .json()
             .init();
     } else {
         tracing_subscriber::fmt()
             .with_span_events(span_format)
             .with_env_filter(EnvFilter::from_default_env())
-            .json()
             .init();
     }
 }
