@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use backoff::ExponentialBackoff;
 use bytes::Bytes;
 use futures::{
@@ -7,7 +9,7 @@ use futures::{
 use mouseion::units::Slot;
 use object_store::{aws::AmazonS3, ObjectStore};
 use tokio::{spawn, task::JoinHandle};
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::ObjectPath;
 
@@ -53,6 +55,9 @@ pub fn run_store_bundles_thread(
     mut slots_to_delete_tx: Sender<Slot>,
 ) -> JoinHandle<()> {
     spawn(async move {
+        let mut count = 0;
+        let start = SystemTime::now();
+
         while let Some((slot, path, bundle_gz)) = compressed_bundles_rx.next().await {
             match store_bundle(bundle_gz, &bundles_stroe, path, slot).await {
                 Ok(_) => slots_to_delete_tx.send(slot).await.unwrap(),
@@ -60,6 +65,14 @@ pub fn run_store_bundles_thread(
                     panic!("store_bundle failed: {:?}", e);
                 }
             };
+
+            count += 1;
+
+            if count % 10 == 0 {
+                let elapsed = SystemTime::now().duration_since(start).unwrap();
+                let rate = count as f64 / elapsed.as_secs_f64();
+                info!("stored {} bundles at {:.2} bundles/sec", count, rate);
+            }
         }
     })
 }
