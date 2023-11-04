@@ -83,7 +83,7 @@ pub fn get_env_bool(key: &str) -> Option<bool> {
         "f" => false,
         "1" => true,
         "0" => false,
-        _ => panic!("env var {key} is not a bool"),
+        str => panic!("invalid bool value {str} for {key}"),
     })
 }
 

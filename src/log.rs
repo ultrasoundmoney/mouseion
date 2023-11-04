@@ -3,22 +3,17 @@ use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
 use crate::env::ENV_CONFIG;
 
 pub fn init() {
-    let span_format = if ENV_CONFIG.log_perf {
-        FmtSpan::CLOSE
+    let builder = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env());
+
+    let builder = if ENV_CONFIG.log_perf {
+        builder.with_span_events(FmtSpan::CLOSE)
     } else {
-        FmtSpan::NONE
+        builder
     };
 
     if ENV_CONFIG.log_json {
-        tracing_subscriber::fmt()
-            .with_span_events(span_format)
-            .with_env_filter(EnvFilter::from_default_env())
-            .json()
-            .init();
+        builder.json().init();
     } else {
-        tracing_subscriber::fmt()
-            .with_span_events(span_format)
-            .with_env_filter(EnvFilter::from_default_env())
-            .init();
-    }
+        builder.init();
+    };
 }
