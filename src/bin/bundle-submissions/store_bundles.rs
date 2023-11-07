@@ -13,6 +13,19 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::ObjectPath;
 
+async fn bundle_exists(
+    object_store: &AmazonS3,
+    path: ObjectPath,
+) -> Result<bool, backoff::Error<::object_store::Error>> {
+    let object_metas = object_store
+        .list(Some(&path))
+        .await?
+        .collect::<Vec<_>>()
+        .await;
+    let exists = !object_metas.is_empty();
+    Ok(exists)
+}
+
 #[instrument(skip(bundle_gz, object_store), fields(path = path.to_string(), %slot))]
 async fn store_bundle(
     bundle_gz: Bytes,
@@ -21,6 +34,15 @@ async fn store_bundle(
     slot: Slot,
 ) -> anyhow::Result<()> {
     backoff::future::retry(ExponentialBackoff::default(), || async {
+        // It's possible a bundle has been stored, but source submissions have not been
+        // successfully deleted. In that case, we don't want to overwrite the bundle, as the new
+        // bundle is probably constructed from partial data.
+        let bundle_exists = bundle_exists(object_store, path.clone()).await?;
+        if bundle_exists {
+            warn!("bundle already exists, skipping");
+            return Ok(());
+        }
+
         object_store
             .put(&path, bundle_gz.clone())
             .await
