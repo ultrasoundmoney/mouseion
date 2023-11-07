@@ -60,7 +60,7 @@ async fn bundle_slot(object_store: AmazonS3, slot: Slot) -> anyhow::Result<Vec<B
     Ok(block_submissions)
 }
 
-const FETCH_BUNDLE_CONCURRENCY: usize = 8;
+const FETCH_BUNDLE_CONCURRENCY: usize = 32;
 
 pub fn run_bundle_slots_thread(
     slots_rx: Receiver<Slot>,
