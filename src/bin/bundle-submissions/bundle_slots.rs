@@ -1,10 +1,14 @@
 use ::object_store::{aws::AmazonS3, ObjectStore};
+use anyhow::Context;
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt, TryStreamExt,
 };
 use mouseion::{object_store, units::Slot, BlockSubmission};
-use tokio::{spawn, task::JoinHandle};
+use tokio::{
+    spawn,
+    task::{spawn_blocking, JoinHandle},
+};
 use tracing::{debug, instrument, trace, warn};
 
 /// Does three things given a slot.
@@ -30,8 +34,14 @@ async fn bundle_slot(object_store: AmazonS3, slot: Slot) -> anyhow::Result<Vec<B
         let bytes_gz =
             backoff::future::retry(backoff::ExponentialBackoff::default(), get_with_retry).await?;
 
-        let decoder = flate2::read::GzDecoder::new(&bytes_gz[..]);
-        let block_submission: BlockSubmission = serde_json::from_reader(decoder)?;
+        let block_submission: BlockSubmission = spawn_blocking(move || {
+            let decoder = flate2::read::GzDecoder::new(&bytes_gz[..]);
+            let block_submission: BlockSubmission = serde_json::from_reader(decoder)?;
+            Ok::<_, anyhow::Error>(block_submission)
+        })
+        .await
+        .context("failed to join block submission decompression thread")?
+        .context("failed to decompress block submission")?;
 
         trace!(
             block_hash = block_submission.block_hash(),
