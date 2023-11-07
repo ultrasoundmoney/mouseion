@@ -15,7 +15,6 @@ mod store_bundles;
 
 use std::sync::Arc;
 
-use ::object_store as object_store_lib;
 use futures::{channel::mpsc::channel, try_join};
 use lazy_static::lazy_static;
 use mouseion::{env::ENV_CONFIG, log, object_store};
@@ -27,7 +26,7 @@ use crate::{
     discover_slots::run_discover_slots_thread, store_bundles::run_store_bundles_thread,
 };
 
-type ObjectPath = object_store_lib::path::Path;
+type ObjectPath = ::object_store::path::Path;
 
 lazy_static! {
     static ref SOURCE_BUCKET: String = (*ENV_CONFIG.submissions_bucket).to_string();
@@ -51,7 +50,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let (slots_to_delete_tx, slots_to_delete_rx) = channel(16);
 
-    let from = std::env::args().nth(1);
+    let from: Option<ObjectPath> = std::env::args().nth(1).map(|str| str.into());
 
     try_join!(
         run_discover_slots_thread(from, submissions_store.clone(), slots_tx),
