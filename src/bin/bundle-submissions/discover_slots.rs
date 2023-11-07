@@ -81,14 +81,13 @@ async fn discover_month_paths(
 
 async fn discover_day_paths(months: &[Path], object_store: &AmazonS3) -> anyhow::Result<Vec<Path>> {
     let days_futs = months
-        .into_iter()
+        .iter()
         .map(|path| object_store.list_with_delimiter(Some(path)))
         .collect::<Vec<_>>();
     let day_list_results = try_join_all(days_futs).await?;
     let days = day_list_results
         .into_iter()
-        .map(|list_results| list_results.common_prefixes)
-        .flatten()
+        .flat_map(|list_results| list_results.common_prefixes)
         .collect();
     Ok(days)
 }
