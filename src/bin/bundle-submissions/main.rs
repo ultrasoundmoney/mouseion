@@ -9,7 +9,7 @@
 //! fashion.
 mod bundle_slots;
 mod compress_bundles;
-mod delete_source_submissions;
+mod delete_sources;
 mod discover_slots;
 mod store_bundles;
 
@@ -22,7 +22,7 @@ use tracing::info;
 
 use crate::{
     bundle_slots::run_bundle_slots_thread, compress_bundles::run_compression_thread,
-    delete_source_submissions::run_delete_source_submissions_thread,
+    delete_sources::run_delete_source_submissions_thread,
     discover_slots::run_discover_slots_thread, store_bundles::run_store_bundles_thread,
 };
 
