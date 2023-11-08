@@ -8,7 +8,7 @@ use mouseion::units::Slot;
 use object_store_lib::aws::AmazonS3;
 use object_store_lib::ObjectStore;
 use tokio::{spawn, task::JoinHandle};
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument(skip(object_store), fields(%slot))]
 async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<()> {
@@ -24,13 +24,12 @@ async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<
                 .await
                 .context("failed to execute object store delete operation")
                 .map_err(|err| {
-                    if err.to_string().contains("409 Conflict")
-                        || err.to_string().to_lowercase().contains("connection closed")
-                        || err
-                            .to_string()
-                            .to_lowercase()
-                            .contains("connection reset by peer")
-                    {
+                    let err_str = err.to_string().to_lowercase();
+                    let is_retryable = err_str.contains("409 conflict")
+                        || err_str.contains("connection closed")
+                        || err_str.contains("connection reset by peer")
+                        || err_str.contains("503 service unavailable");
+                    if is_retryable {
                         warn!("failed to execute OVH put operation: {}, retrying", err);
                         backoff::Error::Transient {
                             err,
