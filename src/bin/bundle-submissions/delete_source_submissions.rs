@@ -56,13 +56,19 @@ pub fn run_delete_source_submissions_thread(
     slots_to_delete_rx: Receiver<Slot>,
 ) -> JoinHandle<()> {
     spawn(async move {
-        slots_to_delete_rx
+        let result = slots_to_delete_rx
             .map(Ok)
             .try_for_each_concurrent(DELETE_SLOT_CONCURRENCY, |slot| {
                 let object_store = object_store.clone();
                 delete_slot(object_store, slot)
             })
-            .await
-            .unwrap();
+            .await;
+        match result {
+            Ok(()) => info!("delete source submissions thread exiting"),
+            Err(e) => error!(
+                "delete source submissions thread exiting with error: {:?}",
+                e
+            ),
+        }
     })
 }
