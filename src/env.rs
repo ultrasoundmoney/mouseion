@@ -40,11 +40,6 @@ pub fn get_env_var(key: &str) -> Option<String> {
     var
 }
 
-/// Get an environment variable we can't run without.
-pub fn get_env_var_unsafe(key: &str) -> String {
-    get_env_var(key).unwrap_or_else(|| panic!("{key} should be in env"))
-}
-
 /// Some things do not need to be configurable explicitly but do differ between environments. This
 /// enum helps create those distinctions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,7 +124,7 @@ fn get_env_config() -> EnvConfig {
         log_perf: get_env_bool("LOG_PERF").unwrap_or(false),
         network: get_network(),
         pod_name: get_env_var("POD_NAME"),
-        redis_uri: get_env_var_unsafe("REDIS_URI"),
+        redis_uri: get_env_var("REDIS_URI").expect("REDIS_URI not set"),
         submissions_bucket: get_env_var("SUBMISSIONS_BUCKET")
             .unwrap_or("block-submission-archive-dev".to_string()),
     }
@@ -138,20 +133,6 @@ fn get_env_config() -> EnvConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[should_panic]
-    fn test_get_env_var_unsafe_panics() {
-        get_env_var_unsafe("DOESNT_EXIST");
-    }
-
-    #[test]
-    fn test_get_env_var_unsafe() {
-        let test_key = "TEST_KEY_UNSAFE";
-        let test_value = "my-env-value";
-        std::env::set_var(test_key, test_value);
-        assert_eq!(get_env_var_unsafe(test_key), test_value);
-    }
 
     #[test]
     fn test_get_env_var_safe_some() {
