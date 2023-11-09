@@ -23,22 +23,9 @@ async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<
                 .delete(&object_meta.location)
                 .await
                 .context("failed to execute object store delete operation")
-                .map_err(|err| {
-                    let err_str = err.to_string().to_lowercase();
-                    let is_retryable = err_str.contains("409 conflict")
-                        || err_str.contains("connection closed")
-                        || err_str.contains("connection reset by peer")
-                        || err_str.contains("503 service unavailable");
-                    if is_retryable {
-                        warn!("failed to execute OVH put operation: {}, retrying", err);
-                        backoff::Error::Transient {
-                            err,
-                            retry_after: None,
-                        }
-                    } else {
-                        error!("{}", err);
-                        backoff::Error::Permanent(err)
-                    }
+                .map_err(|e| {
+                    warn!(error = %e, "failed to delete submission");
+                    e.into()
                 })
         })
         .await?;
