@@ -17,11 +17,7 @@ async fn bundle_exists(
     object_store: &AmazonS3,
     path: ObjectPath,
 ) -> Result<bool, backoff::Error<::object_store::Error>> {
-    let object_metas = object_store
-        .list(Some(&path))
-        .await?
-        .collect::<Vec<_>>()
-        .await;
+    let object_metas = object_store.list(Some(&path)).collect::<Vec<_>>().await;
     let exists = !object_metas.is_empty();
     Ok(exists)
 }
@@ -33,14 +29,14 @@ async fn store_bundle(
     path: ObjectPath,
     slot: Slot,
 ) -> anyhow::Result<()> {
-    backoff::future::retry(ExponentialBackoff::default(), || async {
+    let op = || async {
         // It's possible a bundle has been stored, but source submissions have not been
         // successfully deleted. In that case, we don't want to overwrite the bundle, as the new
         // bundle is probably constructed from partial data.
         let bundle_exists = bundle_exists(object_store, path.clone()).await?;
         if bundle_exists {
             warn!("bundle already exists, skipping");
-            return Ok(());
+            return Ok::<_, backoff::Error<::object_store::Error>>(());
         }
 
         object_store
@@ -62,9 +58,11 @@ async fn store_bundle(
                     error!("{}", err);
                     backoff::Error::Permanent(err)
                 }
-            })
-    })
-    .await?;
+            })?;
+
+        Ok(())
+    };
+    backoff::future::retry(ExponentialBackoff::default(), op).await?;
 
     debug!("stored bundle");
 

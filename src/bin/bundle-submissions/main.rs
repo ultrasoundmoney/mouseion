@@ -7,6 +7,7 @@
 //! same vicinity hit the same bottleneck and limit our rate to some 100 payloads per second. To
 //! speed up the process we have slot discovery discover slots from different hours in round robin
 //! fashion.
+mod beacon_node;
 mod bundle_slots;
 mod compress_bundles;
 mod delete_sources;
@@ -21,8 +22,8 @@ use mouseion::{env::ENV_CONFIG, log, object_store};
 use tracing::info;
 
 use crate::{
-    bundle_slots::run_bundle_slots_thread, compress_bundles::run_compression_thread,
-    delete_sources::run_delete_source_submissions_thread,
+    beacon_node::BeaconNode, bundle_slots::run_bundle_slots_thread,
+    compress_bundles::run_compression_thread, delete_sources::run_delete_source_submissions_thread,
     discover_slots::run_discover_slots_thread, store_bundles::run_store_bundles_thread,
 };
 
@@ -42,6 +43,13 @@ pub async fn main() -> anyhow::Result<()> {
 
     let bundles_store = object_store::build_bundles_store()?;
 
+    let beacon_node = BeaconNode::new(
+        ENV_CONFIG
+            .beacon_node_url
+            .as_ref()
+            .expect("beacon node url"),
+    );
+
     let (slots_tx, slots_rx) = channel(16);
 
     let (bundles_tx, bundles_rx) = channel(32);
@@ -50,10 +58,8 @@ pub async fn main() -> anyhow::Result<()> {
 
     let (slots_to_delete_tx, slots_to_delete_rx) = channel(16);
 
-    let from: Option<ObjectPath> = std::env::args().nth(1).map(|str| str.into());
-
     try_join!(
-        run_discover_slots_thread(from, submissions_store.clone(), slots_tx),
+        run_discover_slots_thread(beacon_node, submissions_store.clone(), slots_tx),
         run_bundle_slots_thread(bundles_tx, submissions_store.clone(), slots_rx),
         run_compression_thread(bundles_rx, compressed_bundles_tx),
         run_store_bundles_thread(bundles_store, compressed_bundles_rx, slots_to_delete_tx),

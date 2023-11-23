@@ -13,7 +13,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 #[instrument(skip(object_store), fields(%slot))]
 async fn delete_slot(object_store: Arc<AmazonS3>, slot: Slot) -> anyhow::Result<()> {
     let path = slot.partial_s3_path();
-    let mut block_submission_meta_stream = object_store.list(Some(&path)).await?;
+    let mut block_submission_meta_stream = object_store.list(Some(&path));
 
     while let Some(object_meta) = block_submission_meta_stream.try_next().await? {
         trace!(location = %object_meta.location, "deleting submission");

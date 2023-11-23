@@ -105,6 +105,7 @@ pub fn get_network() -> Network {
 
 #[derive(Debug, Clone)]
 pub struct EnvConfig {
+    pub beacon_node_url: Option<String>,
     pub bundles_bucket: String,
     pub env: Env,
     pub log_json: bool,
@@ -117,6 +118,7 @@ pub struct EnvConfig {
 
 fn get_env_config() -> EnvConfig {
     EnvConfig {
+        beacon_node_url: get_env_var("BEACON_NODE_URL"),
         bundles_bucket: get_env_var("BUNDLES_BUCKET")
             .unwrap_or("block-submission-bundles-dev".to_string()),
         env: get_env(),

@@ -31,7 +31,6 @@ async fn bundle_slot(object_store: &AmazonS3, slot: Slot) -> anyhow::Result<Vec<
     let list_with_retry = || async {
         let metas = object_store
             .list(Some(&path))
-            .await?
             .try_collect::<Vec<_>>()
             .await?;
         let paths = metas
