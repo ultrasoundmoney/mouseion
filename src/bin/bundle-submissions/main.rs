@@ -1,12 +1,5 @@
 //! # Bundle submissions
 //! Takes individual block submissions and bundles them up by slot.
-//!
-//! ## Performance notes
-//! Speeding up by fetching slots in parallel seems to not work well at all. We need to fetch all
-//! submissions for a slot, which may be hundreds to low thousands. It appears slots in the
-//! same vicinity hit the same bottleneck and limit our rate to some 100 payloads per second. To
-//! speed up the process we have slot discovery discover slots from different hours in round robin
-//! fashion.
 mod beacon_node;
 mod bundle_slots;
 mod compress_bundles;
